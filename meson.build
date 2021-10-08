@@ -7,5 +7,5 @@ if compiler.get_id() == 'clang'
   add_project_link_arguments('-stdlib=libc++', language : 'cpp')
 endif
 
-executable('es-lsp', 'src/main.cpp', 'src/DataNode.cpp', 'src/fmt/format.cc', 'src/lsp.cpp', 'src/log.cpp', 'src/definitions.cpp',
+executable('es-lsp', 'src/main.cpp', 'src/DataNode.cpp', 'src/fmt/format.cc', 'src/lsp.cpp', 'src/log.cpp', 'src/definitions.cpp', 'src/utils.cpp',
   include_directories : include_directories('include'),)

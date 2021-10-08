@@ -207,9 +207,8 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
       if (Optional >= Node->Parameters.size()) {
         auto &Diag = Result.Diagnostics.emplace_back(*Node, 0);
         Diag.Kind = Diagnostic::Error;
-        Diag.Message =
-            fmt::format("Not enough arguments, {} missing.",
-                        Optional - Node->Parameters.size() + 1);
+        Diag.Message = fmt::format("Not enough arguments, {} missing.",
+                                   Optional - Node->Parameters.size() + 1);
       }
     }
 

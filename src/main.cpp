@@ -43,10 +43,7 @@ int main(int Argc, char *Argv[]) {
   // Load data files from resource directory, if any.
   if (!ResourcePath.empty()) {
     lsp::Log(">> Loading resource directory '{}'\n", ResourcePath);
-    std::vector<lsp::RootDataNode> Nodes;
-    for (const auto &Path : fs::recursive_directory_iterator(ResourcePath))
-      Nodes.emplace_back(lsp::LoadFromFile(Path));
-    Server.SetResourceNodes(std::move(Nodes));
+    Server.LoadFromDirectory(ResourcePath);
   }
 
   constexpr std::string_view ContentLength = "Content-Length: ";
@@ -58,7 +55,7 @@ int main(int Argc, char *Argv[]) {
   int Size = 0;
   bool IsContent = false;
   std::string Line;
-  while (Server.State() == lsp::ServerState::Running) {
+  while (Server.GetState() == lsp::ServerState::Running) {
     if (IsContent) {
       assert(Size && "invalid size of header");
       lsp::Log(">> Received message from client.\n");
@@ -86,5 +83,5 @@ int main(int Argc, char *Argv[]) {
   }
 
   lsp::Log(">> Shutting down...");
-  return Server.State() == lsp::ServerState::ExitSuccess ? 0 : -1;
+  return Server.GetState() == lsp::ServerState::ExitSuccess ? 0 : -1;
 }
