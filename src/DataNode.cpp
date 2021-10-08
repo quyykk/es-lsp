@@ -175,13 +175,20 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
                                    Node->Parent->Parameters[0]);
       }
     }
-    // FIXME: This should work for any root name.
-    if (!Indent) {
-      // Check if the parameters of the node are correct.
-      const auto &ExpectedTypes = GetParameterTypesOf(RootName);
+    // Check if the parameters of the node are correct.
+    const auto *ExpectedTypes = GetParameterTypesOf(RootName);
+    if (ExpectedTypes) {
+      // Represents the index of the first optional parameters.
+      // We need to handle them specially because they're optional.
+      std::size_t Optional = ExpectedTypes->size();
+      for (std::size_t I = 0; I < ExpectedTypes->size(); ++I)
+        if ((*ExpectedTypes)[I].IsOptional()) {
+          Optional = I;
+          break;
+        }
       for (std::size_t I = 1; I < Node->Parameters.size(); ++I) {
         // There might be too many parameters.
-        if (I > ExpectedTypes.size()) {
+        if (I > ExpectedTypes->size()) {
           auto &Diag = Result.Diagnostics.emplace_back(*Node, I);
           Diag.Kind = Diagnostic::Warning;
           Diag.Message = fmt::format("Unused parameter.");
@@ -189,20 +196,20 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
         }
 
         auto Type = lsp::Type(Node->Parameters[I]);
-        if (Type != ExpectedTypes[I - 1]) {
+        if (Type != (*ExpectedTypes)[I - 1]) {
           auto &Diag = Result.Diagnostics.emplace_back(*Node, I);
           Diag.Kind = Diagnostic::Error;
           Diag.Message = fmt::format("Expected type '{}' got '{}'.",
-                                     ExpectedTypes[I - 1], Type);
+                                     (*ExpectedTypes)[I - 1], Type);
         }
       }
       // There might be too few parameters.
-      if (ExpectedTypes.size() >= Node->Parameters.size()) {
+      if (Optional >= Node->Parameters.size()) {
         auto &Diag = Result.Diagnostics.emplace_back(*Node, 0);
         Diag.Kind = Diagnostic::Error;
         Diag.Message =
             fmt::format("Not enough arguments, {} missing.",
-                        ExpectedTypes.size() - Node->Parameters.size() + 1);
+                        Optional - Node->Parameters.size() + 1);
       }
     }
 

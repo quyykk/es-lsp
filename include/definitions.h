@@ -11,9 +11,10 @@ namespace lsp {
 struct Type {
   enum TypeKind { Keyword, Double, String, OptionalDouble, OptionalString } Kind;
 
-  Type(TypeKind Kind) noexcept : Kind(Kind) {}
+  constexpr Type(TypeKind Kind) noexcept : Kind(Kind) {}
   explicit Type(std::string_view String) noexcept;
 
+  constexpr bool IsOptional() const noexcept { return Kind >= OptionalDouble; }
   operator std::string_view() const noexcept;
 
   friend constexpr bool operator==(const Type &Lhs, const Type &Rhs) noexcept;
@@ -34,7 +35,7 @@ constexpr bool operator!=(const Type &Lhs, const Type &Rhs) noexcept {
 
 bool IsValidRootNode(std::string_view Name);
 const std::set<std::string_view> &GetChildrenOf(std::string_view Root);
-const std::vector<Type> &GetParameterTypesOf(std::string_view First);
+const std::vector<Type> *GetParameterTypesOf(std::string_view First);
 
 } // namespace lsp
 

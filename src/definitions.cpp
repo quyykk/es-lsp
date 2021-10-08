@@ -226,8 +226,9 @@ const std::set<std::string_view> &lsp::GetChildrenOf(std::string_view Root) {
   return It->second;
 }
 
-const std::vector<lsp::Type> &lsp::GetParameterTypesOf(std::string_view First) {
+const std::vector<lsp::Type> *lsp::GetParameterTypesOf(std::string_view First) {
   auto It = Types.find(First);
-  assert(It != Types.end() && "invalid root name");
-  return It->second;
+  if (It == Types.end())
+      return nullptr;
+  return &It->second;
 }
