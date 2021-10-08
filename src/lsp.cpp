@@ -37,10 +37,10 @@ std::vector<lsp::Workspace> ParseWorkspace(const json::Value &Value) {
   std::vector<lsp::Workspace> workspaces;
   for (json::SizeType I = 0; I < Value.Size(); ++I) {
     auto Name = Value[I].FindMember("name");
-    if (Name == Value.MemberEnd() || !Name->value.IsString())
+    if (Name == Value[I].MemberEnd() || !Name->value.IsString())
       continue;
     auto Uri = Value[I].FindMember("uri");
-    if (Uri == Value.MemberEnd() || !Uri->value.IsString())
+    if (Uri == Value[I].MemberEnd() || !Uri->value.IsString())
       continue;
     workspaces.emplace_back();
     workspaces.back().Name = Name->value.GetString();
