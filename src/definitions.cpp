@@ -144,18 +144,133 @@ const std::unordered_map<std::string_view, std::vector<lsp::Type>> Types{
      {lsp::Type::String, lsp::Type::Double, lsp::Type::Double,
       lsp::Type::Double, lsp::Type::Double}},
     {"conversation", {lsp::Type::String}},
+    {"scene", {lsp::Type::Sprite}},
+    {"label", {lsp::Type::String}},
+    {"choice", {}},
+    {"name", {}},
+    {"branch", {}},
+    {"action", {}},
+    {"apply", {}},
     {"effect", {lsp::Type::String}},
+    {"sprite", {lsp::Type::Sprite}},
+    {"lifetime", {lsp::Type::Double}},
+    {"random lifetime", {lsp::Type::Double}},
+    {"velocity scale", {lsp::Type::Double}},
+    {"random velocity", {lsp::Type::Double}},
+    {"random angle", {lsp::Type::Double}},
+    {"random spin", {lsp::Type::Double}},
+    {"random frame rate", {lsp::Type::Double}},
     {"event", {lsp::Type::String}},
-    {"fleet", {lsp::Type::String}},
+    {"date", {lsp::Type::Double, lsp::Type::Double, lsp::Type::Double}},
+    {"unvisit", {lsp::Type::System}},
+    {"visit", {lsp::Type::System}},
+    {"unvisit planet", {lsp::Type::Planet}},
+    {"visit planet", {lsp::Type::Planet}},
+    {"fleet", {lsp::Type::Fleet}},
+    {"names", {lsp::Type::String}}, // FIXME
+    {"fighters", {lsp::Type::String}}, // FIXME
+    {"cargo", {lsp::Type::Double}},
+    {"commodities", {}},
+    {"outfitters", {}},
+    {"personality", {lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
+    {"variant", {lsp::Type::String}},
     {"galaxy", {lsp::Type::String}},
+    {"pos", {lsp::Type::Double, lsp::Type::Double}},
     {"government", {lsp::Type::String}},
+    {"display name", {lsp::Type::String}},
+    {"swizzle", {lsp::Type::Double}},
+    {"player reputation", {lsp::Type::Double}},
+    {"crew attack", {lsp::Type::Double}},
+    {"crew defense", {lsp::Type::Double}},
+    {"attitude toward", {}},
+    {"penalty for", {}},
+    {"bribe", {lsp::Type::Double}},
+    {"fine", {lsp::Type::Double}},
+    {"enforces", {}},
+    {"death sentence", {lsp::Type::String}}, // FIXME
+    {"friendly hail", {lsp::Type::String}}, // FIXME
+    {"friendly disabled hail", {lsp::Type::String}}, // FIXME
+    {"hostile hail", {lsp::Type::String}}, // FIXME
+    {"hostile disabled hail", {lsp::Type::String}}, // FIXME
+    {"language", {lsp::Type::String}},
+    {"raid", {lsp::Type::Fleet}},
     {"hazard", {lsp::Type::String}},
+    {"constant strength", {}},
+    {"period", {lsp::Type::Double}},
+    {"duration", {lsp::Type::Double, lsp::Type::OptionalDouble}},
+    {"strength", {lsp::Type::Double, lsp::Type::OptionalDouble}},
+    {"range", {lsp::Type::Double, lsp::Type::OptionalDouble}},
+    {"environmental effect", {lsp::Type::Effect, lsp::Type::OptionalDouble}},
     {"interface", {lsp::Type::String}},
+    {"anchor", {lsp::Type::String}}, // FIXME
+    {"value", {lsp::Type::String, lsp::Type::Double}},
+    {"point", {lsp::Type::String}},
+    {"box", {lsp::Type::String}},
+    {"visible", {lsp::Type::String, lsp::Type::OptionalString}}, // FIXME
+    {"active", {lsp::Type::String, lsp::Type::OptionalString}}, // FIXME
+    // FIXME: Fix interface duplicate nodes with different behavior than expected.
     {"minable", {lsp::Type::String}},
+    {"hull", {lsp::Type::Double}},
+    {"payload", {lsp::Type::String, lsp::Type::OptionalDouble}},
+    {"explode", {lsp::Type::String, lsp::Type::OptionalDouble}},
     {"mission", {lsp::Type::String}},
+    {"name", {lsp::Type::String}},
+    {"uuid", {lsp::Type::String}}, // FIXME?
+    {"description", {lsp::Type::String}},
+    {"blocked", {lsp::Type::String}},
+    {"deadline", {lsp::Type::Double, lsp::Type::Double, lsp::Type::Double}},
+    {"cargo", {lsp::Type::Double, lsp::Type::Double, lsp::Type::OptionalDouble, lsp::Type::OptionalDouble}},
+    {"passengers", {lsp::Type::Double, lsp::Type::OptionalDouble, lsp::Type::OptionalDouble}},
+    {"illegal", {lsp::Type::Double, lsp::Type::OptionalString}},
+    {"stealth", {}},
+    {"invisible", {}},
+    {"priority", {}},
+    {"minor", {}},
+    {"autosave", {}},
+    {"job", {}},
+    {"landing", {}},
+    {"assisting", {}},
+    {"boarding", {}},
+    {"repeat", {lsp::Type::OptionalDouble}},
+    {"clearance", {lsp::Type::OptionalDouble}},
+    {"infiltrating", {}},
+    {"failed", {}},
+    {"to", {lsp::Type::String}}, // FIXME
+    {"source", {lsp::Type::OptionalString}}, // FIXME
+    {"destination", {lsp::Type::OptionalString}}, // FIXME
+    {"waypoint", {lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
+    {"stopover", {lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
+    {"npc", {}},
+    {"on", {lsp::Type::String}}, // FIXME
     {"outfit", {lsp::Type::String}},
+    {"category", {lsp::Type::String}},
+    {"plural", {lsp::Type::String}},
+    {"flare sprite", {lsp::Type::Sprite}},
+    {"reverse flare sprite", {lsp::Type::Sprite}},
+    {"steering flare sprite", {lsp::Type::Sprite}},
+    {"flare sound", {lsp::Type::String}}, // FIXME
+    {"reverse flare sound", {lsp::Type::String}}, // FIXME
+    {"steering flare sound", {lsp::Type::String}}, // FIXME
+    {"afterburner effect", {lsp::Type::Effect}},
+    {"jump effect", {lsp::Type::Effect}},
+    {"hyperdrive sound", {lsp::Type::String}}, // FIXME
+    {"hyperdrive in sound", {lsp::Type::String}}, // FIXME
+    {"hyperdrive out sound", {lsp::Type::String}}, // FIXME
+    {"jump sound", {lsp::Type::String}}, // FIXME
+    {"jump in sound", {lsp::Type::String}}, // FIXME
+    {"jump out sound", {lsp::Type::String}}, // FIXME
+    {"floatsam sprite", {lsp::Type::Sprite}},
+    {"thumbnail", {lsp::Type::Sprite}},
+    {"weapon", {}},
+    {"ammo", {lsp::Type::Outfit}},
+    {"cost", {lsp::Type::Double}},
+    {"mass", {lsp::Type::Double}},
+    {"licenses", {lsp::Type::OptionalString, lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
+    {"jump range", {lsp::Type::Double}},
     {"outfitter", {lsp::Type::String}},
     {"person", {lsp::Type::String}},
+    // {"system", {}}, // FIXME
+    {"frequency", {lsp::Type::Double}},
     {"phrase", {lsp::Type::OptionalString}},
     {"planet", {lsp::Type::String}},
     {"ship", {lsp::Type::String, lsp::Type::OptionalString}},
@@ -169,7 +284,7 @@ const std::unordered_map<std::string_view, std::vector<lsp::Type>> Types{
     {"star", {lsp::Type::String}},
     {"news", {lsp::Type::String}},
     {"rating", {lsp::Type::String}},
-    {"category", {lsp::Type::Keyword}},
+    // FIXME: {"category", {lsp::Type::Keyword}},
     {"tip", {lsp::Type::String}},
     {"help", {lsp::Type::String}},
 };
@@ -213,6 +328,22 @@ lsp::Type::operator std::string_view() const noexcept {
   case Type::String:
   case Type::OptionalString:
     return "string";
+  case Type::Effect:
+    return "effect";
+  case Type::Fleet:
+    return "fleet";
+  case Type::Hazard:
+    return "hazard";
+  case Type::Outfit:
+    return "outfit";
+  case Type::Planet:
+    return "planet";
+  case Type::Ship:
+    return "ship";
+  case Type::Sprite:
+    return "sprite";
+  case Type::System:
+    return "system";
   default:
     __builtin_unreachable();
   }

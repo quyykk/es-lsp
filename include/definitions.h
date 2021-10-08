@@ -9,12 +9,31 @@
 namespace lsp {
 
 struct Type {
-  enum TypeKind { Keyword, Double, String, OptionalDouble, OptionalString } Kind;
+  enum TypeKind {
+    Keyword,
+
+    Double,
+    String,
+
+    OptionalDouble,
+    OptionalString,
+
+    Effect,
+    Fleet,
+    Hazard,
+    Outfit,
+    Planet,
+    Ship,
+    Sprite,
+    System,
+  } Kind;
 
   constexpr Type(TypeKind Kind) noexcept : Kind(Kind) {}
   explicit Type(std::string_view String) noexcept;
 
-  constexpr bool IsOptional() const noexcept { return Kind >= OptionalDouble; }
+  constexpr bool IsOptional() const noexcept {
+    return Kind == OptionalDouble || Kind == OptionalString;
+  }
   operator std::string_view() const noexcept;
 
   friend constexpr bool operator==(const Type &Lhs, const Type &Rhs) noexcept;
@@ -22,11 +41,15 @@ struct Type {
 };
 
 constexpr bool operator==(const Type &Lhs, const Type &Rhs) noexcept {
-  return (Lhs.Kind == Type::String && Rhs.Kind == Type::OptionalString)
-    || (Lhs.Kind == Type::OptionalString && Rhs.Kind == Type::String)
-    || (Lhs.Kind == Type::Double && Rhs.Kind == Type::OptionalDouble)
-    || (Lhs.Kind == Type::OptionalDouble && Rhs.Kind == Type::Double)
-    || Lhs.Kind == Rhs.Kind;
+  return (Lhs.Kind == Type::String && Rhs.Kind == Type::OptionalString) ||
+         (Lhs.Kind == Type::OptionalString && Rhs.Kind == Type::String) ||
+         (Lhs.Kind == Type::Double && Rhs.Kind == Type::OptionalDouble) ||
+         (Lhs.Kind == Type::OptionalDouble && Rhs.Kind == Type::Double) ||
+         // FIXME: The next two should only be "active" when only a single file
+         // is loaded. For projects we should diagnose missing definitions.
+         (Lhs.Kind >= Type::Effect && Rhs.Kind == Type::String) ||
+         (Lhs.Kind == Type::String && Rhs.Kind >= Type::Effect) ||
+         Lhs.Kind == Rhs.Kind;
 }
 
 constexpr bool operator!=(const Type &Lhs, const Type &Rhs) noexcept {
