@@ -1,0 +1,22 @@
+name: CI
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install meson
+        run: pip install meson
+      - name: Install ninja
+        run: sudo apt install ninja-build
+      - name: Build
+        run: |
+          meson build
+          cd build
+          ninja
