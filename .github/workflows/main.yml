@@ -17,6 +17,6 @@ jobs:
         run: sudo apt install ninja-build
       - name: Build
         run: |
-          meson build
+          CXX=g++-10 meson build
           cd build
           ninja
