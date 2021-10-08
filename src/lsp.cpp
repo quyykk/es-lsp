@@ -118,13 +118,11 @@ void lsp::Server::HandleNotification(std::string Message) {
 
   // TODO: What are workspace symbols?
   // TODO: Implement file watch operations.
-  // TODO: 'workspace/didChangeWorkspaceFolders'
   if (*Method == "workspace/didChangeWorkspaceFolders")
     return DidChangeWorkspaceFolders(Id->value, ParamsVal->value);
   if (*Method == "workspace/didChangeConfiguration")
     // We don't have any configurations yet.
     return;
-  // TODO: 'textDocument/didOpen'
   if (*Method == "textDocument/didOpen")
     return DidOpen(Id->value, ParamsVal->value);
   if (*Method == "textDocument/didChange")
