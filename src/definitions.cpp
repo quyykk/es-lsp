@@ -45,10 +45,46 @@ const lsp::Type MissionOnType{.Kind = lsp::Type::String,
 
 // Common node definitions that appear everywhere.
 const lsp::NodeDefinition FullSprite(std::string_view Name) {
-  // FIXME
-  return {.Name = Name};
+  return {.Name = Name,
+          .ParameterTypes = {Sprite},
+          .Children = {
+              {.Name = "frame rate", .ParameterTypes = {Double}},
+              {.Name = "frame time", .ParameterTypes = {Double}},
+              {.Name = "delay", .ParameterTypes = {Double}},
+              {.Name = "scale", .ParameterTypes = {Double}},
+              {.Name = "start frame", .ParameterTypes = {Double}},
+              {.Name = "random start frame"},
+              {.Name = "no repeat"},
+              {.Name = "rewind"},
+          }};
 }
 lsp::NodeDefinition WeaponNode{.Name = "weapon"}; // FIXME
+lsp::NodeDefinition HazardWeapon{
+    .Name = "weapon",
+    .Children = {{.Name = "shield damage", .ParameterTypes = {Double}},
+                 {.Name = "hull damage", .ParameterTypes = {Double}},
+                 {.Name = "fuel damage", .ParameterTypes = {Double}},
+                 {.Name = "heat damage", .ParameterTypes = {Double}},
+                 {.Name = "energy damage", .ParameterTypes = {Double}},
+                 {.Name = "ion damage", .ParameterTypes = {Double}},
+                 {.Name = "disruption damage", .ParameterTypes = {Double}},
+                 {.Name = "slowing damage", .ParameterTypes = {Double}},
+                 {.Name = "relative shield damage", .ParameterTypes = {Double}},
+                 {.Name = "relative hull damage", .ParameterTypes = {Double}},
+                 {.Name = "relative fuel damage", .ParameterTypes = {Double}},
+                 {.Name = "relative heat damage", .ParameterTypes = {Double}},
+                 {.Name = "relative energy damage", .ParameterTypes = {Double}},
+                 {.Name = "piercing", .ParameterTypes = {Double}},
+                 {.Name = "hit force", .ParameterTypes = {Double}},
+                 {.Name = "gravitational"},
+                 {.Name = "blast radius", .ParameterTypes = {Double}},
+                 {.Name = "damage dropoff",
+                  .ParameterTypes = {Double, Double},
+                  .OptionalIndex = 1},
+                 {.Name = "dropoff modifier", .ParameterTypes = {Double}},
+                 {.Name = "target effect",
+                  .ParameterTypes = {Effect, Double},
+                  .OptionalIndex = 1}}};
 
 // The node definitions that define the syntax for each possible definition.
 const std::unordered_map<std::string_view, lsp::NodeDefinition> Definitions{
@@ -143,7 +179,7 @@ const std::unordered_map<std::string_view, lsp::NodeDefinition> Definitions{
     {"hazard",
      {.Name = "hazard",
       .ParameterTypes = {String},
-      .Children = {WeaponNode,
+      .Children = {HazardWeapon,
                    {.Name = "constant strength"},
                    {.Name = "period", .ParameterTypes = {Int}},
                    {.Name = "duration",
