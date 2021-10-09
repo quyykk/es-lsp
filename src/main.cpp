@@ -32,16 +32,21 @@ int main(int Argc, char *Argv[]) {
       ResourcePath = Arg;
   }
 
-  fs::path Directory = ResourcePath;
-  if (!ResourcePath.empty() && !fs::exists(Directory)) {
-    lsp::LogError(">> Unknown directory '{}'.\n", ResourcePath);
-    return -1;
-  }
-
   lsp::Server Server;
 
+  fs::path Directory = ResourcePath;
   // Load data files from resource directory, if any.
   if (!ResourcePath.empty()) {
+    if (!fs::exists(Directory)) {
+      lsp::LogError(">> Unknown directory '{}'.\n", ResourcePath);
+      return -1;
+    }
+    if (!fs::is_directory(Directory)) {
+      lsp::LogError(">> Resource path '{}' is not a directory.\n",
+                    ResourcePath);
+      return -1;
+    }
+
     lsp::Log(">> Loading resource directory '{}'\n", ResourcePath);
     Server.LoadFromDirectory(ResourcePath);
   }

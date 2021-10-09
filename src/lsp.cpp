@@ -69,7 +69,7 @@ std::list<lsp::Workspace> ParseWorkspace(const json::Value &Value) {
 
     workspaces.emplace_back();
     workspaces.back().Name = *Name;
-    workspaces.back().Uri = *Uri;
+    workspaces.back().Path = lsp::UriToFsPath(*Uri);
   }
   return workspaces;
 }
@@ -179,8 +179,24 @@ void lsp::Server::HandleNotification(std::string Message) {
 }
 
 void lsp::Server::LoadFromDirectory(std::string_view Path) {
+  if (!fs::exists(Path) || !fs::is_directory(Path))
+    return;
+
   for (const auto &Path : fs::recursive_directory_iterator(Path)) {
-    // FIXME
+    if (Path.is_directory())
+      continue;
+
+    const std::string FsPath = Path.path().c_str();
+    if (Files.find(FsPath) != Files.end())
+      // The file already exists. Either the file was opened explicitly by the
+      // client, or it was opened as part of a workspace or the resource
+      // directory.
+      // We don't really need to do anything.
+      continue;
+
+    auto &File = Files[FsPath];
+    File.Path = FsPath;
+    File.CachedNodes = LoadFromText(FsPath, File.Content);
   }
 }
 
@@ -293,7 +309,7 @@ void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
 
     auto WorkspaceIt = std::find_if(
         Workspaces.begin(), Workspaces.end(),
-        [&Path](const auto &Workspace) { return Workspace.Uri == *Path; });
+        [&Path](const auto &Workspace) { return Workspace.Path == *Path; });
     if (WorkspaceIt == Workspaces.end())
       return SendError(InvalidRequest, "Specified workspace doesn't exist", Id);
 
@@ -318,7 +334,7 @@ void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
 
     Workspaces.emplace_back();
     Workspaces.back().Name = *Name;
-    Workspaces.back().Uri = *Path;
+    Workspaces.back().Path = UriToFsPath(*Path);
     LoadFromWorkspace(Workspaces.back());
   }
   Log(">> 'workspace/didChangeWorkspaceFolders' done!\n");
@@ -340,14 +356,21 @@ void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
   if (!Text)
     return SendError(ParseError, "Error parsing 'text' field", Id);
 
-  auto &File = Files[std::string(*Path)];
-  File.Uri = *Path;
-  File.Content = *Text;
-  File.Version = *Version;
-  File.IsOpen = true;
-  File.Parent = nullptr;
-  File.CachedNodes = LoadFromText(*Path, File.Content);
-  UpdateDiagnosticsFor(*Path, File);
+  auto FsPath = UriToFsPath(*Path);
+  auto It = Files.find(FsPath);
+  if (It != Files.end())
+    ; // The files is already loaded, normally because it is part of a
+      // workspace.
+  else {
+    // If the file doesn't exist we load it.
+    It = Files.emplace(FsPath, File()).first;
+    It->second.Path = FsPath;
+    It->second.CachedNodes = LoadFromText(*Path, *Text);
+    UpdateDiagnosticsFor(*Path, It->second);
+  }
+  It->second.Content = *Text;
+  It->second.Version = *Version;
+  It->second.IsOpen = true;
 
   Log(">> 'textDocument/didOpen' done!\n");
 }
@@ -368,14 +391,16 @@ void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
   if (Changes == Value.MemberEnd() || !Changes->value.IsArray())
     return SendError(ParseError, "Error parsing 'contentChanges' field", Id);
 
-  auto It = Files.find(std::string(*Path));
-  assert(It != Files.end() && "how was this file not loaded?");
+  auto FsPath = UriToFsPath(*Path);
+  auto It = Files.find(FsPath);
+  if (It == Files.end())
+    return SendError(InvalidRequest, "didChange called on unloaded file", Id);
 
   auto &File = It->second;
   if (!File.IsOpen)
     return SendError(InvalidRequest, "didChange called on unopened file", Id);
 
-  // If the version is old, don't do anything.
+  // If the version is older than what the server has, don't do anything.
   if (File.Version > *Version)
     return;
 
@@ -417,7 +442,7 @@ void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
       assert(!"not implemented! why is the client sending this?");
     }
     File.CachedNodes = LoadFromText(*Path, File.Content);
-    UpdateDiagnosticsFor(*Path, File);
+    UpdateDiagnosticsFor(FsPath, File);
   }
 
   Log(">> 'textDocument/didChange' done!\n");
@@ -433,8 +458,11 @@ void lsp::Server::DidClose(const json::Value &Id, const json::Value &Value) {
   if (!Path)
     return SendError(ParseError, "Error parsing 'uri' field", Id);
 
-  auto It = Files.find(std::string(*Path));
-  assert(It != Files.end() && "how was this file not loaded?");
+  auto FsPath = UriToFsPath(*Path);
+  auto It = Files.find(FsPath);
+  if (It == Files.end())
+    return SendError(InvalidRequest, "can't close file that hasn't been loaded",
+                     Id);
   if (!It->second.IsOpen)
     return SendError(InvalidRequest, "can't close file that hasn't been opened",
                      Id);
@@ -482,4 +510,28 @@ void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
   Log(">> Diagnostics done!\n");
 }
 
-void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {}
+void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
+  if (!fs::exists(Workspace.Path) || !fs::is_directory(Workspace.Path))
+    return;
+
+  for (const auto &Path : fs::recursive_directory_iterator(Workspace.Path)) {
+    if (Path.is_directory())
+      continue;
+
+    const std::string FsPath = Path.path().c_str();
+    auto It = Files.find(FsPath);
+    if (It != Files.end()) {
+      // The file is already loaded, but we still need to update its workspace.
+      It->second.Parent = &Workspace;
+      continue;
+    }
+
+    auto &File = Files[FsPath];
+    File.Path = FsPath;
+    File.Parent = &Workspace;
+    File.CachedNodes = LoadFromText(FsPath, File.Content);
+
+    // Workspace files are always error checked.
+    UpdateDiagnosticsFor(Workspace.Path, File);
+  }
+}

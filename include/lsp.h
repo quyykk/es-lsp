@@ -18,8 +18,8 @@ namespace lsp {
 struct Workspace {
   // The name of the workspace (user-defined).
   std::string Name;
-  // The path to the workspace as uri.
-  std::string Uri;
+  // The path to the workspace.
+  std::string Path;
 };
 
 // Reprents a data file that is loaded.
@@ -27,20 +27,20 @@ struct File {
   // The file parsed into data nodes.
   RootDataNode CachedNodes;
 
-  // The uri path to the file.
-  std::string Uri;
+  // The fs path to the file.
+  std::string Path;
 
   // If the file is opened, this contains the contents of the file.
   std::string Content;
 
   // The version of the file for synchronization purposes with the client.
-  int Version;
+  int Version = -1;
 
   // Whether the file is currently opened in the client.
-  bool IsOpen;
+  bool IsOpen = false;
 
   // If this file belongs to a workspace, this will point to it.
-  const Workspace *Parent;
+  const Workspace *Parent = nullptr;
 };
 
 // The current state of the server.
