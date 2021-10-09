@@ -1,310 +1,330 @@
 #include "definitions.h"
 
+#include "DataNode.h"
+#include "fmt/core.h"
+
 #include <cassert>
 #include <unordered_map>
 
 namespace {
 
-const std::set<std::string_view> Roots{
-    "color",     "conversation", "effect",     "event",
-    "fleet",     "galaxy",       "government", "hazard",
-    "interface", "minable",      "mission",    "outfit",
-    "outfitter", "person",       "phrase",     "planet",
-    "ship",      "shipyard",     "start",      "system",
-    "test",      "test-data",    "trade",      "landing message",
-    "star",      "news",         "rating",     "category",
-    "tip",       "help"};
+const lsp::Type Double{lsp::Type::Double};
+const lsp::Type Int{lsp::Type::Int};
+const lsp::Type String{lsp::Type::String};
+// Types with annotations.
+const lsp::Type Conversation{lsp::Type::String, "conversation"};
+const lsp::Type Effect{lsp::Type::String, "effect"};
+const lsp::Type Event{lsp::Type::String, "event"};
+const lsp::Type Fleet{lsp::Type::String, "fleet"};
+const lsp::Type Galaxy{lsp::Type::String, "galaxy"};
+const lsp::Type Government{lsp::Type::String, "government"};
+const lsp::Type Hazard{lsp::Type::String, "hazard"};
+const lsp::Type News{lsp::Type::String, "news"};
+const lsp::Type Outfit{lsp::Type::String, "outfit"};
+const lsp::Type Outfitter{lsp::Type::String, "outfitter"};
+const lsp::Type Phrase{lsp::Type::String, "phrase"};
+const lsp::Type Planet{lsp::Type::String, "planet"};
+const lsp::Type Ship{lsp::Type::String, "ship"};
+const lsp::Type Shipyard{lsp::Type::String, "shipyard"};
+const lsp::Type Sound{lsp::Type::String, "sound"};
+const lsp::Type Sprite{lsp::Type::String, "sprite"};
+const lsp::Type System{lsp::Type::String, "system"};
+// Types with keywords.
+const lsp::Type PenaltyForType{.Kind = lsp::Type::String,
+                               .Keywords = {"assist", "disable", "board",
+                                            "capture", "destroy", "atrocity"}};
+const lsp::Type Alignment{
+    .Kind = lsp::Type::String,
+    .Keywords = {"left", "top", "right", "bottom", "center"}};
+const lsp::Type MissionToType{.Kind = lsp::Type::String,
+                              .Keywords = {"offer", "complete", "fail"}};
+const lsp::Type MissionOnType{.Kind = lsp::Type::String,
+                              .Keywords = {"complete", "enter", "accept",
+                                           "decline", "fail", "abort", "defer",
+                                           "visit", "stopover", "waypoint"}};
 
-const std::unordered_map<std::string_view, std::set<std::string_view>> Children{
-    {"color", {}},
-    {"conversation",
-     {"scene", "label", "choice", "name", "branch", "apply", "action"}},
-    {"effect",
-     {"sprite" /*full*/, "sound", "lifetime", "random lifetime",
-      "velocity scale", "random velocity", "random angle", "random spin",
-      "random frame rate"}},
-    {"event",
-     {"date", "unvisit", "visit", "unvisit planet", "visit planet", "link",
-      "unlink", "fleet", "galaxy", "government", "outfitter", "news", "planet",
-      "shipyard", "system"}},
-    {"fleet",
-     {"government", "names", "fighters", "cargo", "commodities", "outfitters",
-      "personality", "variant"}},
-    {"galaxy", {"pos", "sprite" /*simple*/}},
-    {"government",
-     {"display name", "swizzle", "color", "player reputation", "crew attack",
-      "crew defense", "attitude toward", "penalty for", "bribe", "fine",
-      "enforces", "death sentence", "friendly hail", "friendly disabled hail",
-      "hostile hail", "hostile disabled hail", "language", "raid"}},
-    {"hazard",
-     {"weapon", "constant strength", "period", "duration", "strength", "range",
-      "environmental effect"}},
-    {"interface",
-     {"anchor", "value", "point", "visible", "active", "sprite", "image",
-      "outline", "label", "string", "button", "bar", "ring"}},
-    {"minable", {"sprite" /*simple*/, "hull", "payload", "explode"}},
-    {"mission",
-     {"name",      "uuid",       "description", "blocked",     "deadline",
-      "cargo",     "passengers", "illegal",     "stealth",     "invisible",
-      "priority",  "minor",      "autosave",    "job",         "landing",
-      "assisting", "boarding",   "repeat",      "clearance",   "infiltrating",
-      "failed",    "to",         "source",      "destination", "waypoint",
-      "stopover",  "npc",        "on"}},
-    {"outfit",
-     {"category",
-      "plural",
-      "flare sprite" /*full*/,
-      "reverse flare sprite" /*full*/,
-      "steering flare sprite" /*full*/,
-      "flare sound",
-      "reverse flare sound",
-      "steering flare sound",
-      "afterburner effect",
-      "jump effect",
-      "hyperdrive sound",
-      "hyperdrive in sound",
-      "hyperdrive out sound",
-      "jump sound",
-      "jump in sound",
-      "jump out sound",
-      "floatsam sprite" /*simple*/,
-      "thumbnail" /*simple*/,
-      "weapon",
-      "ammo",
-      "description",
-      "cost",
-      "mass",
-      "licenses",
-      "jump range"}},  // Infinite children
-    {"outfitter", {}}, // Infinite children iff outfit
-    {"person",
-     {"system", "frequency", "ship", "government", "personality", "phrase"}},
-    {"phrase", {}},
-    {"planet",
-     {"attributes", "shipyard", "outfitter", "landscape", "music",
-      "description", "spaceport", "government", "required reputation", "bribe",
-      "security", "tribute"}},
-    {"ship",
-     {"sprite" /*full*/,
-      "thumbnail" /*simple*/,
-      "name",
-      "plural",
-      "noun",
-      "swizzle",
-      "uuid",
-      "attributes",
-      "engine",
-      "reverse engine",
-      "steering engine",
-      "gun",
-      "turret",
-      "never disabled",
-      "uncapturable",
-      "fighter",
-      "drone",
-      "bay",
-      "leak",
-      "explode",
-      "final explode",
-      "outfits",
-      "cargo",
-      "crew",
-      "fuel",
-      "shields",
-      "hull",
-      "position",
-      "system",
-      "planet",
-      "destination system",
-      "parked",
-      "description",
-      "actions"}},
-    {"shipyard", {}}, // Infinite children iff ship.
-    {"start",
-     {"name", "description", "thumbnail" /*simple*/, "ship",
-      "conversation"}}, // + unlimited conditions.
-    {"system",
-     {"hidden", "attributes", "link", "asteroids", "minables", "fleet",
-      "hazard", "pos", "government", "music", "habitable", "belt", "jump range",
-      "haze", "trade", "object", "arrival"}},
-    {"test", {"key", "pointer", "command"}},
-    {"test-data", {"category"}}, // + a save game.
-    {"trade", {"commodity"}},
-    {"landing message", {}}, // Infinite children iff sprite.
-    {"star", {"power", "wind"}},
-    {"news", {"location", "name", "portrait", "message", "to"}},
-    {"rating", {}}, // FIXME
-    {"category", {}},
-    {"tip", {}},
-    {"help", {}}, // FIXME
-};
+// Common node definitions that appear everywhere.
+const lsp::NodeDefinition FullSprite(std::string_view Name) {
+  // FIXME
+  return {.Name = Name};
+}
+lsp::NodeDefinition WeaponNode{.Name = "weapon"}; // FIXME
 
-const std::unordered_map<std::string_view, std::vector<lsp::Type>> Types{
+// The node definitions that define the syntax for each possible definition.
+const std::unordered_map<std::string_view, lsp::NodeDefinition> Definitions{
     {"color",
-     {lsp::Type::String, lsp::Type::Double, lsp::Type::Double,
-      lsp::Type::Double, lsp::Type::Double}},
-    {"conversation", {lsp::Type::String}},
-    {"scene", {lsp::Type::Sprite}},
-    {"label", {lsp::Type::String}},
-    {"choice", {}},
-    {"name", {}},
-    {"branch", {}},
-    {"action", {}},
-    {"apply", {}},
-    {"effect", {lsp::Type::String}},
-    {"sprite", {lsp::Type::Sprite}},
-    {"lifetime", {lsp::Type::Double}},
-    {"random lifetime", {lsp::Type::Double}},
-    {"velocity scale", {lsp::Type::Double}},
-    {"random velocity", {lsp::Type::Double}},
-    {"random angle", {lsp::Type::Double}},
-    {"random spin", {lsp::Type::Double}},
-    {"random frame rate", {lsp::Type::Double}},
-    {"event", {lsp::Type::String}},
-    {"date", {lsp::Type::Double, lsp::Type::Double, lsp::Type::Double}},
-    {"unvisit", {lsp::Type::System}},
-    {"visit", {lsp::Type::System}},
-    {"unvisit planet", {lsp::Type::Planet}},
-    {"visit planet", {lsp::Type::Planet}},
-    {"fleet", {lsp::Type::Fleet}},
-    {"names", {lsp::Type::String}}, // FIXME
-    {"fighters", {lsp::Type::String}}, // FIXME
-    {"cargo", {lsp::Type::Double}},
-    {"commodities", {}},
-    {"outfitters", {}},
-    {"personality", {lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
-    {"variant", {lsp::Type::String}},
-    {"galaxy", {lsp::Type::String}},
-    {"pos", {lsp::Type::Double, lsp::Type::Double}},
-    {"government", {lsp::Type::String}},
-    {"display name", {lsp::Type::String}},
-    {"swizzle", {lsp::Type::Double}},
-    {"player reputation", {lsp::Type::Double}},
-    {"crew attack", {lsp::Type::Double}},
-    {"crew defense", {lsp::Type::Double}},
-    {"attitude toward", {}},
-    {"penalty for", {}},
-    {"bribe", {lsp::Type::Double}},
-    {"fine", {lsp::Type::Double}},
-    {"enforces", {}},
-    {"death sentence", {lsp::Type::String}}, // FIXME
-    {"friendly hail", {lsp::Type::String}}, // FIXME
-    {"friendly disabled hail", {lsp::Type::String}}, // FIXME
-    {"hostile hail", {lsp::Type::String}}, // FIXME
-    {"hostile disabled hail", {lsp::Type::String}}, // FIXME
-    {"language", {lsp::Type::String}},
-    {"raid", {lsp::Type::Fleet}},
-    {"hazard", {lsp::Type::String}},
-    {"constant strength", {}},
-    {"period", {lsp::Type::Double}},
-    {"duration", {lsp::Type::Double, lsp::Type::OptionalDouble}},
-    {"strength", {lsp::Type::Double, lsp::Type::OptionalDouble}},
-    {"range", {lsp::Type::Double, lsp::Type::OptionalDouble}},
-    {"environmental effect", {lsp::Type::Effect, lsp::Type::OptionalDouble}},
-    {"interface", {lsp::Type::String}},
-    {"anchor", {lsp::Type::String}}, // FIXME
-    {"value", {lsp::Type::String, lsp::Type::Double}},
-    {"point", {lsp::Type::String}},
-    {"box", {lsp::Type::String}},
-    {"visible", {lsp::Type::String, lsp::Type::OptionalString}}, // FIXME
-    {"active", {lsp::Type::String, lsp::Type::OptionalString}}, // FIXME
-    // FIXME: Fix interface duplicate nodes with different behavior than expected.
-    {"minable", {lsp::Type::String}},
-    {"hull", {lsp::Type::Double}},
-    {"payload", {lsp::Type::String, lsp::Type::OptionalDouble}},
-    {"explode", {lsp::Type::String, lsp::Type::OptionalDouble}},
-    {"mission", {lsp::Type::String}},
-    {"name", {lsp::Type::String}},
-    {"uuid", {lsp::Type::String}}, // FIXME?
-    {"description", {lsp::Type::String}},
-    {"blocked", {lsp::Type::String}},
-    {"deadline", {lsp::Type::Double, lsp::Type::Double, lsp::Type::Double}},
-    {"cargo", {lsp::Type::Double, lsp::Type::Double, lsp::Type::OptionalDouble, lsp::Type::OptionalDouble}},
-    {"passengers", {lsp::Type::Double, lsp::Type::OptionalDouble, lsp::Type::OptionalDouble}},
-    {"illegal", {lsp::Type::Double, lsp::Type::OptionalString}},
-    {"stealth", {}},
-    {"invisible", {}},
-    {"priority", {}},
-    {"minor", {}},
-    {"autosave", {}},
-    {"job", {}},
-    {"landing", {}},
-    {"assisting", {}},
-    {"boarding", {}},
-    {"repeat", {lsp::Type::OptionalDouble}},
-    {"clearance", {lsp::Type::OptionalDouble}},
-    {"infiltrating", {}},
-    {"failed", {}},
-    {"to", {lsp::Type::String}}, // FIXME
-    {"source", {lsp::Type::OptionalString}}, // FIXME
-    {"destination", {lsp::Type::OptionalString}}, // FIXME
-    {"waypoint", {lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
-    {"stopover", {lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
-    {"npc", {}},
-    {"on", {lsp::Type::String}}, // FIXME
-    {"outfit", {lsp::Type::String}},
-    {"category", {lsp::Type::String}},
-    {"plural", {lsp::Type::String}},
-    {"flare sprite", {lsp::Type::Sprite}},
-    {"reverse flare sprite", {lsp::Type::Sprite}},
-    {"steering flare sprite", {lsp::Type::Sprite}},
-    {"flare sound", {lsp::Type::String}}, // FIXME
-    {"reverse flare sound", {lsp::Type::String}}, // FIXME
-    {"steering flare sound", {lsp::Type::String}}, // FIXME
-    {"afterburner effect", {lsp::Type::Effect}},
-    {"jump effect", {lsp::Type::Effect}},
-    {"hyperdrive sound", {lsp::Type::String}}, // FIXME
-    {"hyperdrive in sound", {lsp::Type::String}}, // FIXME
-    {"hyperdrive out sound", {lsp::Type::String}}, // FIXME
-    {"jump sound", {lsp::Type::String}}, // FIXME
-    {"jump in sound", {lsp::Type::String}}, // FIXME
-    {"jump out sound", {lsp::Type::String}}, // FIXME
-    {"floatsam sprite", {lsp::Type::Sprite}},
-    {"thumbnail", {lsp::Type::Sprite}},
-    {"weapon", {}},
-    {"ammo", {lsp::Type::Outfit}},
-    {"cost", {lsp::Type::Double}},
-    {"mass", {lsp::Type::Double}},
-    {"licenses", {lsp::Type::OptionalString, lsp::Type::OptionalString, lsp::Type::OptionalString}}, // FIXME
-    {"jump range", {lsp::Type::Double}},
-    {"outfitter", {lsp::Type::String}},
-    {"person", {lsp::Type::String}},
-    // {"system", {}}, // FIXME
-    {"frequency", {lsp::Type::Double}},
-    {"phrase", {lsp::Type::OptionalString}},
-    {"planet", {lsp::Type::String}},
-    {"ship", {lsp::Type::String, lsp::Type::OptionalString}},
-    {"shipyard", {lsp::Type::String}},
-    {"start", {lsp::Type::OptionalString}},
-    {"system", {lsp::Type::String}},
-    {"test", {lsp::Type::String}},
-    {"test-data", {lsp::Type::String}},
-    {"trade", {lsp::Type::String}},
-    {"landing message", {lsp::Type::String}},
-    {"star", {lsp::Type::String}},
-    {"news", {lsp::Type::String}},
-    {"rating", {lsp::Type::String}},
-    // FIXME: {"category", {lsp::Type::Keyword}},
-    {"tip", {lsp::Type::String}},
-    {"help", {lsp::Type::String}},
-};
-
+     {.Name = "color", .ParameterTypes = {Double, Double, Double, Double}}},
+    {"conversation", // TODO: Finish syntax tree.
+     {.Name = "conversation",
+      .ParameterTypes = {String},
+      .Children = {{.Name = "scene", .ParameterTypes = {Sprite}},
+                   {.Name = "label", .ParameterTypes = {String}},
+                   {.Name = "choice", .Children = {{.BaseType = String}}},
+                   {.Name = "name"},
+                   {.Name = "branch"}}}},
+    {"effect",
+     {.Name = "effect",
+      .ParameterTypes = {String},
+      .Children = {FullSprite("sprite"),
+                   {.Name = "sound", .ParameterTypes = {Sound}},
+                   {.Name = "lifetime", .ParameterTypes = {Double}},
+                   {.Name = "random lifetime", .ParameterTypes = {Double}},
+                   {.Name = "velocity scale", .ParameterTypes = {Double}},
+                   {.Name = "random velocity", .ParameterTypes = {Double}},
+                   {.Name = "random angle", .ParameterTypes = {Double}},
+                   {.Name = "random spin", .ParameterTypes = {Double}},
+                   {.Name = "random frame rate", .ParameterTypes = {Double}}}}},
+    {"event",
+     {.Name = "event",
+      .ParameterTypes = {String},
+      .Children = {{.Name = "date", .ParameterTypes = {Double, Double, Double}},
+                   {.Name = "unvisit", .ParameterTypes = {System}},
+                   {.Name = "visit", .ParameterTypes = {System}},
+                   {.Name = "unvisit planet", .ParameterTypes = {Planet}},
+                   {.Name = "visit planet", .ParameterTypes = {Planet}},
+                   {.Name = "fleet", .ParameterTypes = {Fleet}},
+                   {.Name = "galaxy", .ParameterTypes = {Galaxy}},
+                   {.Name = "government", .ParameterTypes = {Government}},
+                   {.Name = "outfitter", .ParameterTypes = {Outfitter}},
+                   {.Name = "news", .ParameterTypes = {News}},
+                   {.Name = "planet", .ParameterTypes = {Planet}},
+                   {.Name = "shipyard", .ParameterTypes = {Shipyard}},
+                   {.Name = "system", .ParameterTypes = {System}}}}},
+    {"fleet",
+     {.Name = "fleet",
+      .ParameterTypes = {String},
+      .Children =
+          {
+              {.Name = "government", .ParameterTypes = {Government}},
+              {.Name = "names", .ParameterTypes = {Phrase}},
+              {.Name = "fighters", .ParameterTypes = {Phrase}},
+              {.Name = "cargo", .ParameterTypes = {Int}},
+              {.Name = "commodities",
+               .ParameterTypes = {String, String},
+               .VariableIndex = 1},
+              {.Name = "outfitters",
+               .ParameterTypes = {Outfitter, Outfitter},
+               .VariableIndex = 1},
+              // TODO: personality
+              // TODO: variant
+          }}},
+    {"galaxy",
+     {.Name = "galaxy",
+      .ParameterTypes = {String},
+      .Children = {{.Name = "pos", .ParameterTypes = {Double, Double}},
+                   {.Name = "sprite", .ParameterTypes = {Sprite}}}}},
+    {"government",
+     {.Name = "government",
+      .ParameterTypes = {String},
+      .Children =
+          {{.Name = "display name", .ParameterTypes = {String}},
+           {.Name = "swizzle", .ParameterTypes = {Int}},
+           {.Name = "color", .ParameterTypes = {Double, Double, Double}},
+           {.Name = "player reputation", .ParameterTypes = {Double}},
+           {.Name = "crew attack", .ParameterTypes = {Double}},
+           {.Name = "crew defense", .ParameterTypes = {Double}},
+           {.Name = "attitude toward",
+            .Children = {{.BaseType = Government, .ParameterTypes = {Double}}},
+            .VariableChildIndex = 0},
+           {.Name = "penalty for",
+            .Children = {{.BaseType = PenaltyForType,
+                          .ParameterTypes = {Double}}},
+            .VariableChildIndex = 0},
+           {.Name = "bribe", .ParameterTypes = {Double}},
+           {.Name = "fine", .ParameterTypes = {Double}},
+           {.Name = "enforces"}, // FIXME
+           {.Name = "death sentence", .ParameterTypes = {Conversation}},
+           {.Name = "friendly hail", .ParameterTypes = {Phrase}},
+           {.Name = "friendly disabled hail", .ParameterTypes = {Phrase}},
+           {.Name = "hostile hail", .ParameterTypes = {Phrase}},
+           {.Name = "hostile disabled hail", .ParameterTypes = {Phrase}},
+           {.Name = "language", .ParameterTypes = {String}},
+           {.Name = "raid", .ParameterTypes = {Fleet}}}}},
+    {"hazard",
+     {.Name = "hazard",
+      .ParameterTypes = {String},
+      .Children = {WeaponNode,
+                   {.Name = "constant strength"},
+                   {.Name = "period", .ParameterTypes = {Int}},
+                   {.Name = "duration",
+                    .ParameterTypes = {Int, Int},
+                    .OptionalIndex = 1},
+                   {.Name = "strength",
+                    .ParameterTypes = {Double, Double},
+                    .OptionalIndex = 1},
+                   {.Name = "range",
+                    .ParameterTypes = {Double, Double},
+                    .OptionalIndex = 1},
+                   {.Name = "environmental effect",
+                    .ParameterTypes = {Effect, Int},
+                    .OptionalIndex = 1}}}},
+    {"interface",
+     {// TODO: Finish this.
+      .Name = "interface",
+      .ParameterTypes = {String},
+      .Children = {{.Name = "anchor",
+                    .ParameterTypes = {Alignment},
+                    .VariableIndex = 0},
+                   {.Name = "value", .ParameterTypes = {String, Double}},
+                   {.Name = "point"},
+                   {.Name = "box"},
+                   {.Name = "visible"},
+                   {.Name = "active"}}}},
+    {"minable",
+     {.Name = "minable",
+      .ParameterTypes = {String},
+      .Children =
+          {
+              {.Name = "sprite", .ParameterTypes = {Sprite}},
+              {.Name = "hull", .ParameterTypes = {Double}},
+              {.Name = "payload",
+               .ParameterTypes = {Outfit, Double},
+               .OptionalIndex = 1},
+              {.Name = "explode",
+               .ParameterTypes = {Effect, Double},
+               .OptionalIndex = 1},
+          }}},
+    {"mission",
+     {.Name = "mission",
+      .ParameterTypes = {String},
+      .Children =
+          {
+              {.Name = "name", .ParameterTypes = {String}},
+              {.Name = "uuid",
+               .ParameterTypes = {String}}, // TODO: Consider a UUID type.
+              {.Name = "description", .ParameterTypes = {String}},
+              {.Name = "blocked", .ParameterTypes = {String}},
+              {.Name = "deadline",
+               .ParameterTypes = {Double, Double, Double},
+               .OptionalIndex = 0},
+              {.Name = "cargo",
+               .ParameterTypes = {String, Double, Double, Double},
+               .OptionalIndex =
+                   2}, // TODO: add support for deprecated children.
+              {.Name = "passengers",
+               .ParameterTypes = {Double, Double, Double},
+               .OptionalIndex = 1},
+              {.Name = "illegal",
+               .ParameterTypes = {Double, Double},
+               .OptionalIndex = 1},
+              {.Name = "stealth"},
+              {.Name = "invisible"},
+              {.Name = "priority"},
+              {.Name = "minor"},
+              {.Name = "autosave"},
+              {.Name = "job"},
+              {.Name = "landing"},
+              {.Name = "boarding"},
+              {.Name = "repeat", .ParameterTypes = {Int}, .OptionalIndex = 0},
+              {.Name = "clearance",
+               .ParameterTypes = {String},
+               .OptionalIndex = 0}, // TODO: finish
+              {.Name = "infiltrating"},
+              {.Name = "failed"},
+              {.Name = "to", .ParameterTypes = {MissionToType}}, // TODO: finish
+              {.Name = "source",
+               .ParameterTypes = {Planet},
+               .OptionalIndex = 0},    // TODO: finish
+              {.Name = "destination"}, // TODO: finish
+              {.Name = "waypont"},     // TODO: finish
+              {.Name = "stopover"},    // TODO: finish
+              {.Name = "npc", .ParameterTypes = {String}},
+              {.Name = "on",
+               .ParameterTypes = {MissionOnType, System},
+               .OptionalIndex = 1}, // TODO: finish
+          }}},
+    {"outfit",
+     {.Name = "outfit",
+      .ParameterTypes = {String},
+      .Children =
+          {
+              {.Name = "category", .ParameterTypes = {String}},
+              {.Name = "plural", .ParameterTypes = {String}},
+              FullSprite("flare sprite"),
+              FullSprite("reverse flare sprite"),
+              FullSprite("steering flare sprite"),
+              {.Name = "flare sound", .ParameterTypes = {Sound}},
+              {.Name = "reverse flare sound", .ParameterTypes = {Sound}},
+              {.Name = "steering flare sound", .ParameterTypes = {Sound}},
+              {.Name = "afterburner effect", .ParameterTypes = {Effect}},
+              {.Name = "jump effect", .ParameterTypes = {Effect}},
+              {.Name = "hyperdrive sound", .ParameterTypes = {Sound}},
+              {.Name = "hyperdrive in sound", .ParameterTypes = {Sound}},
+              {.Name = "hyperdrive out sound", .ParameterTypes = {Sound}},
+              {.Name = "jump sound", .ParameterTypes = {Sound}},
+              {.Name = "jump in sound", .ParameterTypes = {Sound}},
+              {.Name = "jump out sound", .ParameterTypes = {Sound}},
+              {.Name = "floatsam sprite", .ParameterTypes = {Sprite}},
+              {.Name = "thumbnail", .ParameterTypes = {Sprite}},
+              WeaponNode,
+              {.Name = "ammo", .ParameterTypes = {Outfit}},
+              {.Name = "description", .ParameterTypes = {String}},
+              {.Name = "cost", .ParameterTypes = {Double}},
+              {.Name = "mass", .ParameterTypes = {Double}},
+              {.Name = "licenses",
+               .ParameterTypes = {String},
+               .VariableIndex = 0,
+               .Children = {{.BaseType = String}},
+               .VariableChildIndex = 0},
+              {.Name = "jump range", .ParameterTypes = {Double}},
+          }}},
+    {"outfitter",
+     {.Name = "outfitter",
+      .ParameterTypes = {String},
+      .Children = {{.BaseType = Outfit}},
+      .VariableChildIndex = 0}},
+    {"person",
+     {.Name = "person",
+      .ParameterTypes = {String},
+      .Children =
+          {
+              {.Name = "system", .ParameterTypes = {System}},
+              {.Name = "frequency", .ParameterTypes = {Double}},
+              {.Name = "ship", .ParameterTypes = {Ship}}, // TODO: finish
+              {.Name = "government", .ParameterTypes = {Government}},
+              {.Name = "personality",
+               .ParameterTypes = {String},
+               .VariableIndex = 0}, // TODO: finish
+          }}},
+    {"phrase", {.Name = "phrase"}}, // TODO: finish
+    {
+        "planet",
+        {.Name = "planet",
+         .ParameterTypes = {String},
+         .Children =
+             {{.Name = "attributes",
+               .ParameterTypes = {String},
+               .VariableIndex = 0},
+              {.Name = "shipyard", .ParameterTypes = {Shipyard}},
+              {.Name = "outfitter", .ParameterTypes = {Outfitter}},
+              {.Name = "landscape", .ParameterTypes = {Sprite}},
+              {.Name = "government", .ParameterTypes = {Government}},
+              {.Name = "required reputation", .ParameterTypes = {Double}},
+              {.Name = "bribe", .ParameterTypes = {Double}},
+              {.Name = "security", .ParameterTypes = {Double}},
+              {.Name = "tribute",
+               .ParameterTypes = {Double},
+               .Children = {{.Name = "threshold",
+                             .ParameterTypes = {Double}}}}}}, // TODO: finish
+    }};
 } // namespace
 
-lsp::Type::Type(std::string_view String) noexcept {
+lsp::Type lsp::Type::FromString(std::string_view String) noexcept {
   // Try to parse as a number. If it's not a number then it's a string.
   // [+-]?[0-9]*[.]?[0-9]*([eE][+-]?[0-9]*)?
-  Kind = Type::String;
   if (String.empty())
-    return;
+    return {Type::String};
   std::size_t I = 0;
 
+  bool Decimal = false;
   if (String[I] == '+' || String[I] == '-')
     ++I;
   while (I < String.size() && String[I] >= '0' && String[I] <= '9')
     ++I;
-  if (String[I] == '.')
+  if (String[I] == '.') {
     ++I;
+    Decimal = true;
+  }
   while (I < String.size() && String[I] >= '0' && String[I] <= '9')
     ++I;
   if (String[I] == 'e' || String[I] == 'E') {
@@ -314,52 +334,115 @@ lsp::Type::Type(std::string_view String) noexcept {
       ++I;
   }
 
+  if (I == String.size() && !Decimal)
+    return {Type::Int};
   if (I == String.size())
-    Kind = Type::Double;
+    return {Type::Double};
+  return {Type::String};
+}
+
+bool lsp::Type::VerifyType(const Type &Other,
+                           std::string_view Contents) const noexcept {
+  if (Kind == String && Other.Kind == String) {
+    // Both are strings, check if we have a keyword.
+    if (!Keywords.empty() && Keywords.count(Contents))
+      return true;
+    return Keywords.empty();
+  }
+  // Same type is a-ok.
+  else if (*this == Other)
+    return true;
+  // Int -> Double conversion is allowed.
+  else if (Kind == Double && Other.Kind == Int)
+    return true;
+  return false;
 }
 
 lsp::Type::operator std::string_view() const noexcept {
   switch (Kind) {
-  case Type::Keyword:
-    return "keyword";
   case Type::Double:
-  case Type::OptionalDouble:
     return "double";
+  case Type::Int:
+    return "int";
   case Type::String:
-  case Type::OptionalString:
     return "string";
-  case Type::Effect:
-    return "effect";
-  case Type::Fleet:
-    return "fleet";
-  case Type::Hazard:
-    return "hazard";
-  case Type::Outfit:
-    return "outfit";
-  case Type::Planet:
-    return "planet";
-  case Type::Ship:
-    return "ship";
-  case Type::Sprite:
-    return "sprite";
-  case Type::System:
-    return "system";
   default:
     __builtin_unreachable();
   }
 }
 
-bool lsp::IsValidRootNode(std::string_view Name) { return Roots.count(Name); }
+void lsp::CheckLine(std::vector<lsp::Diagnostic> &Diagnostics,
+                    const std::vector<lsp::DataNode *> &Nodes) {
+  if (Nodes.empty())
+    return;
 
-const std::set<std::string_view> &lsp::GetChildrenOf(std::string_view Root) {
-  auto It = Children.find(Root);
-  assert(It != Children.end() && "invalid root name");
-  return It->second;
-}
+  // 1) Go through the parent hierarchy to find the curent line and to see if it
+  // matches.
+  const lsp::NodeDefinition *Def = nullptr;
+  auto It = Definitions.find(Nodes.front()->Parameters.front());
+  if (It == Definitions.end()) {
+    // One node in the hierarchy doesn't exist.
+    if (Nodes.size() == 1) {
+      // Only generate diagnostic once.
+      auto &Diag = Diagnostics.emplace_back(*Nodes.front(), 0);
+      Diag.Kind = lsp::Diagnostic::Error;
+      Diag.Message =
+          fmt::format("'{}' doesn't exist.", Nodes.front()->Parameters.front());
+    }
+    return;
+  }
+  Def = &It->second;
 
-const std::vector<lsp::Type> *lsp::GetParameterTypesOf(std::string_view First) {
-  auto It = Types.find(First);
-  if (It == Types.end())
-      return nullptr;
-  return &It->second;
+  // Now go through the children.
+  for (auto It = Nodes.begin() + 1; It != Nodes.end(); ++It) {
+    auto Search = std::find_if(Def->Children.begin(), Def->Children.end(),
+                               [&It](const auto &Node) {
+                                 return Node.Name == (*It)->Parameters.front();
+                               });
+    if (Search == Def->Children.end()) {
+      // This node doesn't exist. If it is the current node, then we emit a
+      // diagnostic.
+      if (It + 1 == Nodes.end()) {
+        auto &Diag = Diagnostics.emplace_back(**It, 0);
+        Diag.Kind = lsp::Diagnostic::Error;
+        Diag.Message = fmt::format("Invalid child '{}' for '{}'.",
+                                   (*It)->Parameters.front(),
+                                   (*It)->Parent->Parameters.front());
+      }
+      return;
+    }
+    Def = &*Search;
+  }
+
+  // 2) Now that we have the definition of the current node, we type check it.
+  // Represents the index of the first optional parameters.
+  // We need to handle them specially because they're optional.
+  std::size_t Optional = Def->OptionalIndex == -1 ? Def->ParameterTypes.size()
+                                                  : Def->OptionalIndex;
+  for (std::size_t I = 1; I < Nodes.back()->Parameters.size(); ++I) {
+    // There might be too many parameters.
+    if (I > Def->ParameterTypes.size()) {
+      auto &Diag = Diagnostics.emplace_back(*Nodes.back(), I);
+      Diag.Kind = Diagnostic::Warning;
+      Diag.Message = fmt::format("Unused parameter.");
+      continue;
+    }
+
+    auto Type = Type::FromString(Nodes.back()->Parameters[I]);
+    if (!Def->ParameterTypes[I - 1].VerifyType(Type,
+                                               Nodes.back()->Parameters[I])) {
+      auto &Diag = Diagnostics.emplace_back(*Nodes.back(), I);
+      Diag.Kind = Diagnostic::Error;
+      Diag.Message = fmt::format("Expected type '{}' got '{}'.",
+                                 Def->ParameterTypes[I - 1], Type);
+      continue;
+    }
+  }
+  // There might be too few parameters.
+  if (Optional >= Nodes.back()->Parameters.size()) {
+    auto &Diag = Diagnostics.emplace_back(*Nodes.back(), 0);
+    Diag.Kind = Diagnostic::Error;
+    Diag.Message = fmt::format("Not enough arguments, {} missing.",
+                               Optional - Nodes.back()->Parameters.size() + 1);
+  }
 }

@@ -103,6 +103,8 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     // If it does, we need to check which node is its parent.
     DataNode *Node;
     if (!Indent) {
+      Previous.clear();
+      Indents.clear();
       Node = &Result.Nodes.emplace_back();
       Node->Parent = nullptr;
     } else {
@@ -116,6 +118,9 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
       Node->Parent = Previous.back();
     }
     Node->Line = Line;
+
+    Previous.emplace_back(Node);
+    Indents.emplace_back(Indent);
 
     // Now we read any parameters.
     while (Text[I] != '\n' && Text[I] != '#') {
@@ -159,66 +164,12 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     assert(!Node->Parameters.empty() &&
            "empty lines should have been skipped before");
 
-    // Now that we have loaded the whole line, we can generate any diagnostic.
-    const auto &RootName = Node->Parameters[0];
-    const bool IsRootValid = IsValidRootNode(RootName);
-    if (!Indent && !IsRootValid) {
-      auto &Diag = Result.Diagnostics.emplace_back(*Node, 0);
-      Diag.Kind = Diagnostic::Error;
-      Diag.Message = fmt::format("Name '{}' not found.", RootName);
-    } else if (Indent == 1 && IsValidRootNode(Node->Parent->Parameters[0])) {
-      // Check if the children are valid.
-      if (!GetChildrenOf(Node->Parent->Parameters[0]).count(RootName)) {
-        auto &Diag = Result.Diagnostics.emplace_back(*Node, 0);
-        Diag.Kind = Diagnostic::Error;
-        Diag.Message = fmt::format("Invalid child '{}' for '{}'.", RootName,
-                                   Node->Parent->Parameters[0]);
-      }
-    }
-    // Check if the parameters of the node are correct.
-    const auto *ExpectedTypes = GetParameterTypesOf(RootName);
-    if (ExpectedTypes) {
-      // Represents the index of the first optional parameters.
-      // We need to handle them specially because they're optional.
-      std::size_t Optional = ExpectedTypes->size();
-      for (std::size_t I = 0; I < ExpectedTypes->size(); ++I)
-        if ((*ExpectedTypes)[I].IsOptional()) {
-          Optional = I;
-          break;
-        }
-      for (std::size_t I = 1; I < Node->Parameters.size(); ++I) {
-        // There might be too many parameters.
-        if (I > ExpectedTypes->size()) {
-          auto &Diag = Result.Diagnostics.emplace_back(*Node, I);
-          Diag.Kind = Diagnostic::Warning;
-          Diag.Message = fmt::format("Unused parameter.");
-          continue;
-        }
-
-        auto Type = lsp::Type(Node->Parameters[I]);
-        if (Type != (*ExpectedTypes)[I - 1]) {
-          auto &Diag = Result.Diagnostics.emplace_back(*Node, I);
-          Diag.Kind = Diagnostic::Error;
-          Diag.Message = fmt::format("Expected type '{}' got '{}'.",
-                                     (*ExpectedTypes)[I - 1], Type);
-        }
-      }
-      // There might be too few parameters.
-      if (Optional >= Node->Parameters.size()) {
-        auto &Diag = Result.Diagnostics.emplace_back(*Node, 0);
-        Diag.Kind = Diagnostic::Error;
-        Diag.Message = fmt::format("Not enough arguments, {} missing.",
-                                   Optional - Node->Parameters.size() + 1);
-      }
-    }
+    CheckLine(Result.Diagnostics, Previous);
 
     // Skip to the end of the line if this is a comment.
     if (Text[I] == '#')
       while (I < Text.size() && Text[I] != '\n')
         ++I;
-
-    Previous.emplace_back(Node);
-    Indents.emplace_back(Indent);
     // We finished parsing the line, on to the next one.
   }
 
