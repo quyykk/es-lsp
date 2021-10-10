@@ -413,6 +413,8 @@ lsp::Type::operator std::string_view() const noexcept {
   default:
 #ifndef _WIN32
     __builtin_unreachable();
+#else
+    return "";
 #endif
   }
 }
