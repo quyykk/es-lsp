@@ -207,7 +207,7 @@ void lsp::Server::LoadFromDirectory(std::string_view Path) {
 
     auto &File = Files[FsPath];
     File.Path = FsPath;
-    File.CachedNodes = LoadFromText(FsPath, File.Content);
+    File.CachedNodes = LoadFromFile(FsPath);
   }
 }
 
@@ -380,7 +380,7 @@ void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
     It->second.CachedNodes = LoadFromText(*Path, *Text);
     UpdateDiagnosticsFor(*Path, It->second);
   }
-  It->second.Content = *Text;
+  It->second.Content = TextToLines(*Text);
   It->second.Version = *Version;
   It->second.IsOpen = true;
 
@@ -447,13 +447,13 @@ void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
     File.Version = *Version;
     if (!Start && !End)
       // The whole file changed.
-      File.Content = *Text;
+      File.Content = TextToLines(*Text);
     else {
       // FIXME: Only a subset changed. Find out where exactly the change
       // occurred.
       assert(!"not implemented! why is the client sending this?");
     }
-    File.CachedNodes = LoadFromText(*Path, File.Content);
+    File.CachedNodes = LoadFromText(*Path, *Text);
     UpdateDiagnosticsFor(FsPath, File);
   }
 
@@ -511,8 +511,67 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
   if (It == FileIt->second.CachedNodes.Nodes.end()) {
     // We are somewhere without a node definition so figure out on what indent
     // level the client is.
-    // FIXME
-    return SendResult(Id, "[]");
+    if (Position->Line >= FileIt->second.Content.size())
+      return SendError(InvalidRequest, "line too big", Id);
+
+    std::string_view CurrentLine = FileIt->second.Content[Position->Line];
+    const auto Indent =
+        std::count(CurrentLine.begin(), CurrentLine.end(), '\t');
+
+    // Calculate line of node with the same indentation.
+    std::size_t ParentLine = -1;
+    for (auto I = Position->Line - 1; I >= 0; --I) {
+      std::string_view Line = FileIt->second.Content[I];
+      const auto LineIndent = std::count(Line.begin(), Line.end(), '\t');
+      if (Indent - 1 == LineIndent) {
+        // We have the parent, but that's enough.
+        ParentLine = I;
+        break;
+      }
+      if (!Indent)
+        // Stop.
+        break;
+    }
+
+    std::vector<std::string_view> Candidates;
+    if (!Indent) {
+      // No parent means this is a root node to autocomplete.
+      Candidates.reserve(Definitions.size());
+      for (const auto &Def : Definitions)
+        Candidates.emplace_back(Def.first);
+    } else if (ParentLine == -1)
+      return SendResult(Id, "[]");
+    else {
+      const auto &ChildrenIt =
+          FileIt->second.CachedNodes.Nodes.find(ParentLine);
+      if (ChildrenIt == FileIt->second.CachedNodes.Nodes.end())
+        return SendResult(Id, "[]");
+      if (!ChildrenIt->second.Definition)
+        return SendResult(Id, "[]");
+
+      Candidates.reserve(ChildrenIt->second.Definition->Children.size());
+      for (const auto &Child : ChildrenIt->second.Definition->Children)
+        Candidates.emplace_back(Child.Name);
+    }
+
+    // Now we build the list of candidates.
+    // TODO: This code is duplicated.
+    std::string Array;
+    for (const auto &Candidate : Candidates) {
+      Array += fmt::format(
+          R"(
+{{
+    "label": "{}",
+    "kind": 14,
+    "detail": "this is detail",
+    "documentation": "documentation yay"
+}})",
+          Candidate);
+      Array += ',';
+    }
+    if (!Candidates.empty())
+      Array.pop_back();
+    return SendResult(Id, fmt::format("[{}]", Array));
   }
 
   const auto &Node = It->second;
@@ -648,7 +707,7 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
     auto &File = Files[FsPath];
     File.Path = FsPath;
     File.Parent = &Workspace;
-    File.CachedNodes = LoadFromText(FsPath, File.Content);
+    File.CachedNodes = LoadFromFile(FsPath);
 
     // Workspace files are always error checked.
     UpdateDiagnosticsFor(Workspace.Path, File);

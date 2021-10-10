@@ -30,8 +30,8 @@ struct File {
   // The fs path to the file.
   std::string Path;
 
-  // If the file is opened, this contains the contents of the file.
-  std::string Content;
+  // If the file is opened, this contains the contents of the file, line by line.
+  std::vector<std::string> Content;
 
   // The version of the file for synchronization purposes with the client.
   int Version = -1;
