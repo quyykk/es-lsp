@@ -62,7 +62,7 @@ auto lsp::LoadFromFile(const fs::path &Path) -> RootDataNode {
   std::string Contents(Size, '\0');
   if (!File.read(Contents.data(), Size))
     return {};
-  return LoadFromText(Path.c_str(), Contents);
+  return LoadFromText(Path.string().c_str(), Contents);
 }
 
 auto lsp::LoadFromText(std::string_view Path, std::string_view Text)

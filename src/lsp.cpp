@@ -197,7 +197,7 @@ void lsp::Server::LoadFromDirectory(std::string_view Path) {
     if (Path.is_directory())
       continue;
 
-    const std::string FsPath = Path.path().c_str();
+    const std::string FsPath = Path.path().string().c_str();
     if (Files.find(FsPath) != Files.end())
       // The file already exists. Either the file was opened explicitly by the
       // client, or it was opened as part of a workspace or the resource
@@ -703,7 +703,7 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
     if (Path.is_directory())
       continue;
 
-    const std::string FsPath = Path.path().c_str();
+    const std::string FsPath = Path.path().string().c_str();
     auto It = Files.find(FsPath);
     if (It != Files.end()) {
       // The file is already loaded, but we still need to update its
