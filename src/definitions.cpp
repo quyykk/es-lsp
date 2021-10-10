@@ -353,34 +353,44 @@ const std::unordered_map<std::string_view, lsp::NodeDefinition>
                          .ParameterTypes = {Double}}}}}}, // TODO: finish
         }};
 
-const std::unordered_map<std::string_view,
-                         std::unordered_map<std::string_view, std::string_view>>
+const std::unordered_map<
+    std::string_view,
+    std::unordered_map<std::string_view,
+                       std::pair<std::string_view, std::string_view>>>
     lsp::NodeTooltips{
-        {"color", {{"color", "<name> <red> <green> <blue> <alpha>"}}},
+        {"color",
+         {{"color",
+           {"<name> <red> <green> <blue> <alpha>", "A color definition."}}}},
         {"conversation", // TODO: Finish
-         {{"conversation", "<name>"},
-          {"scene", "<image>"},
-          {"label", "<name>"},
-          {"choice", ""},
-          {"name", ""},
-          {"branch", "<if true> [if false]"},
-          {"apply", ""}}},
+         {{"conversation", {"<name>", ""}},
+          {"scene", {"<image>", ""}},
+          {"label", {"<name>", ""}},
+          {"choice", {"", ""}},
+          {"name", {"", ""}},
+          {"branch", {"<if true> [if false]", ""}},
+          {"apply", {"", ""}}}},
         {"effect",
-         {{"effect", "<name"},
-          {"scale", "<number#>"},
-          {"frame rate", "<fps#>"},
-          {"start frame", "<number#>"},
-          {"random start frame", ""},
-          {"no repeat", ""},
-          {"rewind", ""},
-          {"sound", "<name>"},
-          {"lifetime", "<frames#>"},
-          {"random lifetime", "<frames#>"},
-          {"velocity scale", "<scale#>"},
-          {"random velocity", "<velocity#>"},
-          {"random angle", "<degrees#>"},
-          {"random spin", "<degrees#>"},
-          {"random frame rate", "<fps#>"}}}};
+         {{"effect", {"<name", ""}},
+          {"scale", {"<number#>", ""}},
+          {"frame rate", {"<fps#>", "frames per second"}},
+          {"start frame", {"<number#>", ""}},
+          {"random start frame", {"", ""}},
+          {"no repeat", {"", ""}},
+          {"rewind", {"", ""}},
+          {"sound", {"<name>", ""}},
+          {"lifetime", {"<frames#>", ""}},
+          {"random lifetime", {"<frames#>", ""}},
+          {"velocity scale",
+           {"<scale#>",
+            "Without this, an effect will have the same velocity as the ship "
+            "or projectile that \\\"created\\\" it. If this is defined, its "
+            "velocity will be multiplied by this amount. Use a negative number "
+            "to have the effect \\\"bounce\\\" in the opposite direction from the "
+            "projectile."}},
+          {"random velocity", {"<velocity#>", ""}},
+          {"random angle", {"<degrees#>", ""}},
+          {"random spin", {"<degrees#>", ""}},
+          {"random frame rate", {"<fps#>", ""}}}}};
 
 lsp::Type lsp::Type::FromString(std::string_view String) noexcept {
   // Try to parse as a number. If it's not a number then it's a string.

@@ -704,14 +704,14 @@ void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
     // Something went wrong, the child of the root should exist at this point.
     return SendResult(Id, "null");
 
-  std::string Message(Tooltip->first);
-  Message += ' ';
-  Message += Tooltip->second;
+  std::string Message =
+      fmt::format("{} {}\\n___\\n*{}*", Tooltip->first, Tooltip->second.first,
+                  Tooltip->second.second);
 
   SendResult(
       Id, fmt::format(R"(
 {{
-    "contents": "{}",
+    "contents": {{ "kind": "markdown", "value": "{}" }},
     "range": {}
 }})",
                       Message,
