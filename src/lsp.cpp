@@ -585,7 +585,7 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       Index = I;
       break;
     } else if (Position->Column > Node.Columns[I] &&
-               Position->Column < Node.Columns[I] + Node.Parameters[I].size()) {
+               Position->Column <= Node.Columns[I] + Node.Parameters[I].size()) {
       Index = I;
       break;
     }
