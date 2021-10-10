@@ -585,7 +585,8 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       Index = I;
       break;
     } else if (Position->Column > Node.Columns[I] &&
-               Position->Column <= Node.Columns[I] + Node.Parameters[I].size()) {
+               Position->Column <=
+                   Node.Columns[I] + Node.Parameters[I].size()) {
       Index = I;
       break;
     }
@@ -635,7 +636,8 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     "textEdit": {{ "newText": "{}", "replace": {} }}
 }})",
         Candidate, IsCurrent,
-        std::string(Node.Parameters[Index]) + std::string(Candidate), Candidate,
+        std::string(Node.Parameters[Index]) + std::string(Candidate),
+        "\\\"" + std::string(Candidate) + "\\\"",
         // FIXME: Why doesn't VSCode replace the whole word?
         RangeToJson(
             {Node.Line, Node.Columns[Index]},
