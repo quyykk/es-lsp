@@ -31,7 +31,7 @@ std::string ConvertNode(const lsp::DataNode &Node, std::size_t Indent = 0) {
   String += '\n';
 
   for (const auto &Child : Node.Children)
-    String += ConvertNode(Child, Indent + 1);
+    String += ConvertNode(*Child, Indent + 1);
   return String;
 }
 
@@ -48,7 +48,7 @@ std::string lsp::DataNode::ToString() const { return ConvertNode(*this); }
 std::string lsp::RootDataNode::ToString() const {
   std::string Str;
   for (const auto &Node : Nodes) {
-    Str += Node.ToString();
+    Str += Node.second.ToString();
     Str += '\n';
   }
   return Str;
@@ -105,7 +105,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     if (!Indent) {
       Previous.clear();
       Indents.clear();
-      Node = &Result.Nodes.emplace_back();
+      Node = &Result.Nodes[Line];
       Node->Parent = nullptr;
     } else {
       // Choose the correct parent node.
@@ -114,7 +114,8 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
         Previous.pop_back();
         assert(!Indents.empty() && "weird indentation?");
       }
-      Node = &Previous.back()->Children.emplace_back();
+      Node = &Result.Nodes[Line];
+      Previous.back()->Children.emplace_back(Node);
       Node->Parent = Previous.back();
     }
     Node->Line = Line;

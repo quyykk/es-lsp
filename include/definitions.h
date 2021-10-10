@@ -4,6 +4,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace lsp {
@@ -65,6 +66,9 @@ struct NodeDefinition {
   // amount of times.
   int VariableChildIndex = -1;
 };
+
+extern const std::unordered_map<std::string_view, lsp::NodeDefinition>
+    Definitions;
 
 struct DataNode;
 struct Diagnostic;

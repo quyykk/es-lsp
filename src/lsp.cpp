@@ -1,5 +1,6 @@
 #include "lsp.h"
 
+#include "definitions.h"
 #include "fmt/core.h"
 #include "log.h"
 #include "utils.h"
@@ -85,6 +86,15 @@ std::optional<lsp::Location> ParseLocation(const json::Value &Value) {
   return lsp::Location{*Line, *Column};
 }
 
+std::string RangeToJson(const lsp::Location &Start, const lsp::Location &End) {
+  return fmt::format(R"(
+{{
+    "start": {{ "line": {}, "character": {} }},
+    "end": {{" line": {}, "character": {} }}
+}})",
+                     Start.Line, Start.Column, End.Line, End.Column);
+}
+
 constexpr int ParseError = -32700;
 constexpr int InvalidRequest = -32600;
 constexpr int MethodNotFound = -32601;
@@ -155,7 +165,8 @@ void lsp::Server::HandleNotification(std::string Message) {
     return DidChange(Id->value, ParamsVal->value);
   if (*Method == "textDocument/didClose")
     return DidClose(Id->value, ParamsVal->value);
-  // TODO: 'textDocument/completion'
+  if (*Method == "textDocument/completion")
+    return Completion(Id->value, ParamsVal->value);
   // TODO: 'textDocument/hover'
   // TODO: 'textDocument/signatureHelp'
   // TODO: 'textDocument/declaration'
@@ -277,7 +288,8 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
     "capabilities":
     {
           "textDocumentSync": { "openClose": true, "change": 1 },
-          "workspace": { "workspaceFolders": { "supported": true, "changeNotifications": true }}
+          "workspace": { "workspaceFolders": { "supported": true, "changeNotifications": true }},
+          "completionProvider": {}
     },
     "serverInfo": { "name": "es-lsp", "version": "v1.0" }
 })");
@@ -472,6 +484,112 @@ void lsp::Server::DidClose(const json::Value &Id, const json::Value &Value) {
   Log(">> 'textDocument/didClose' done!\n");
 }
 
+void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
+  Log(">> Processing 'textDocument/completion'.\n");
+
+  auto TextDocument = Value.FindMember("textDocument");
+  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
+    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
+  auto Path = GetString(TextDocument->value, "uri");
+  if (!Path)
+    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  auto PositionField = Value.FindMember("position");
+  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
+    return SendError(ParseError, "Error parsing 'position' field", Id);
+
+  auto FsPath = UriToFsPath(*Path);
+  auto Position = ParseLocation(PositionField->value);
+  if (!Position)
+    return SendError(ParseError, "Error parsing inner 'position' field", Id);
+
+  // Now we need to figure out what the autocomplete list is.
+  auto FileIt = Files.find(FsPath);
+  if (FileIt == Files.end())
+    return SendError(InvalidRequest, "completion wanted on unloaded file", Id);
+
+  auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
+  if (It == FileIt->second.CachedNodes.Nodes.end()) {
+    // We are somewhere without a node definition so figure out on what indent
+    // level the client is.
+    // FIXME
+    return SendResult(Id, "[]");
+  }
+
+  const auto &Node = It->second;
+  // Nice, we found the line. Now check where exactly the client wants to
+  // autocomplete.
+
+  // Figure out what parameter we are autocompleting.
+  std::size_t Index = -1;
+  for (std::size_t I = 0; I < Node.Parameters.size(); ++I) {
+    if (Node.Columns[I] == Position->Column) {
+      Index = I;
+      break;
+    } else if (Position->Column > Node.Columns[I] &&
+               Position->Column < Node.Columns[I] + Node.Parameters[I].size()) {
+      Index = I;
+      break;
+    }
+  }
+  if (Index == -1)
+    return SendResult(Id, "[]");
+
+  std::vector<std::string_view> Candidates;
+  if (!Index) {
+    // If we are autocompleting the first parameter, then we need to inspect the
+    // parent to know the possible values.
+    if (Node.Parent) {
+      Candidates.reserve(Node.Parent->Definition->Children.size());
+      for (const auto &Child : Node.Parent->Definition->Children)
+        Candidates.emplace_back(Child.Name);
+    } else {
+      // There is no parent, this means the candidates are the root defs.
+      Candidates.reserve(Definitions.size());
+      for (const auto &Def : Definitions)
+        Candidates.emplace_back(Def.first);
+    }
+  } else {
+    if (!Node.Definition)
+      // Not much we can autocomplete if the node is invalid.
+      return SendResult(Id, "[]");
+    // We inspect the type of the parameter to figure out what to autocomplete.
+    // This is only relevant for keywords.
+    const auto &Type = Node.Definition->ParameterTypes[Index - 1];
+    Candidates.reserve(Type.Keywords.size());
+    for (const auto &Keyword : Type.Keywords)
+      Candidates.emplace_back(Keyword);
+  }
+
+  // Now that we have the candidate list, send it to the client.
+  std::string Array;
+  for (const auto &Candidate : Candidates) {
+    const bool IsCurrent = Candidate == Node.Parameters[Index];
+    Array += fmt::format(
+        R"(
+{{
+    "label": "{}",
+    "kind": 14,
+    "detail": "this is detail",
+    "documentation": "documentation yay",
+    "preselect": {},
+    "filterText": "{}",
+    "textEdit": {{ "newText": "{}", "replace": {} }}
+}})",
+        Candidate, IsCurrent,
+        std::string(Node.Parameters[Index]) + std::string(Candidate), Candidate,
+        // FIXME: Why doesn't VSCode replace the whole word?
+        RangeToJson(
+            {Node.Line, Node.Columns[Index]},
+            {Node.Line, Node.Columns[Index] + Node.Parameters[Index].size()}));
+    Array += ',';
+  }
+  if (!Candidates.empty())
+    Array.pop_back();
+
+  SendResult(Id, fmt::format(R"([{}])", Array));
+  Log(">> 'textDocument/completion' done!\n");
+}
+
 void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
   Log(">> Processing {} diagnostics.\n", File.CachedNodes.Diagnostics.size());
 
@@ -521,7 +639,8 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
     const std::string FsPath = Path.path().c_str();
     auto It = Files.find(FsPath);
     if (It != Files.end()) {
-      // The file is already loaded, but we still need to update its workspace.
+      // The file is already loaded, but we still need to update its
+      // workspace.
       It->second.Parent = &Workspace;
       continue;
     }

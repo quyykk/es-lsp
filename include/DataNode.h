@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -19,9 +20,11 @@ struct DataNode final {
   // This includes the <name> and the <parameters>.
   std::vector<std::string> Parameters;
   // Any children of this data node.
-  std::vector<DataNode> Children;
+  std::vector<DataNode *> Children;
   // The parent, if any.
   const DataNode *Parent;
+  // The type definition of this node if it has been type checked.
+  const struct NodeDefinition *Definition = nullptr;
 
   // The line in the file where this data node is located.
   std::size_t Line;
@@ -52,7 +55,7 @@ struct Diagnostic {
 // Stores all of the DataNodes of a file as well as related data.
 struct RootDataNode final {
   // The data inside this file.
-  std::vector<DataNode> Nodes;
+  std::unordered_map<int, DataNode> Nodes;
   // Any diagnostics are stored here.
   std::vector<Diagnostic> Diagnostics;
 

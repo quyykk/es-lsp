@@ -52,8 +52,8 @@ enum class ServerState {
 
 // A location inside a file.
 struct Location {
-  unsigned Line = 0;
-  unsigned Column = 0;
+  std::size_t Line = 0;
+  std::size_t Column = 0;
 
   constexpr operator bool() const noexcept { return Line || Column; }
 };
@@ -83,6 +83,7 @@ private:
   void DidOpen(const json::Value &Id, const json::Value &Value);
   void DidChange(const json::Value &Id, const json::Value &Value);
   void DidClose(const json::Value &Id, const json::Value &Value);
+  void Completion(const json::Value &Id, const json::Value &Value);
 
   // Sends diagnostics for the given file to the client.
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
