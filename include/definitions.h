@@ -69,6 +69,9 @@ struct NodeDefinition {
 
 extern const std::unordered_map<std::string_view, lsp::NodeDefinition>
     Definitions;
+extern const std::unordered_map<
+    std::string_view, std::unordered_map<std::string_view, std::string_view>>
+    NodeTooltips;
 
 struct DataNode;
 struct Diagnostic;

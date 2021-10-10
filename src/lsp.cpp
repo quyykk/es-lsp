@@ -90,7 +90,7 @@ std::string RangeToJson(const lsp::Location &Start, const lsp::Location &End) {
   return fmt::format(R"(
 {{
     "start": {{ "line": {}, "character": {} }},
-    "end": {{" line": {}, "character": {} }}
+    "end": {{ "line": {}, "character": {} }}
 }})",
                      Start.Line, Start.Column, End.Line, End.Column);
 }
@@ -167,7 +167,8 @@ void lsp::Server::HandleNotification(std::string Message) {
     return DidClose(Id->value, ParamsVal->value);
   if (*Method == "textDocument/completion")
     return Completion(Id->value, ParamsVal->value);
-  // TODO: 'textDocument/hover'
+  if (*Method == "textDocument/hover")
+    return Hover(Id->value, ParamsVal->value);
   // TODO: 'textDocument/signatureHelp'
   // TODO: 'textDocument/declaration'
   // TODO: 'textDocument/definition'
@@ -289,7 +290,8 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
     {
           "textDocumentSync": { "openClose": true, "change": 1 },
           "workspace": { "workspaceFolders": { "supported": true, "changeNotifications": true }},
-          "completionProvider": {}
+          "completionProvider": {},
+          "hoverProvider": {}
     },
     "serverInfo": { "name": "es-lsp", "version": "v1.0" }
 })");
@@ -657,6 +659,69 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
   Log(">> 'textDocument/completion' done!\n");
 }
 
+void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
+  Log(">> Processing 'textDocument/hover'.\n");
+
+  auto TextDocument = Value.FindMember("textDocument");
+  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
+    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
+  auto Path = GetString(TextDocument->value, "uri");
+  if (!Path)
+    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  auto PositionField = Value.FindMember("position");
+  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
+    return SendError(ParseError, "Error parsing 'position' field", Id);
+
+  auto FsPath = UriToFsPath(*Path);
+  auto Position = ParseLocation(PositionField->value);
+  if (!Position)
+    return SendError(ParseError, "Error parsing inner 'position' field", Id);
+
+  auto FileIt = Files.find(FsPath);
+  if (FileIt == Files.end())
+    return SendError(InvalidRequest, "hover wanted on unloaded file", Id);
+
+  auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
+  if (It == FileIt->second.CachedNodes.Nodes.end())
+    // Nothing to hover.
+    return SendResult(Id, "null");
+
+  const auto *Def = It->second.Definition;
+  if (!Def)
+    return SendResult(Id, "null");
+
+  auto *ParentNode = It->second.Parent;
+  while (ParentNode->Parent)
+    ParentNode = ParentNode->Parent;
+  // Now we just need to display the required docs to the client.
+  auto TooltipIt = NodeTooltips.find(ParentNode->Parameters.front());
+  if (TooltipIt == NodeTooltips.end())
+    // Something went wrong, invalid nodes should have been caught above.
+    return SendResult(Id, "null");
+
+  auto Tooltip = TooltipIt->second.find(It->second.Parameters.front());
+  if (Tooltip == TooltipIt->second.end())
+    // Something went wrong, the child of the root should exist at this point.
+    return SendResult(Id, "null");
+
+  std::string Message(Tooltip->first);
+  Message += ' ';
+  Message += Tooltip->second;
+
+  SendResult(
+      Id, fmt::format(R"(
+{{
+    "contents": "{}",
+    "range": {}
+}})",
+                      Message,
+                      RangeToJson({It->second.Line, It->second.Columns.front()},
+                                  {It->second.Line,
+                                   It->second.Columns.front() +
+                                       It->second.Parameters.front().size()})));
+  Log(">> 'textDocument/hover' done!\n");
+}
+
 void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
   Log(">> Processing {} diagnostics.\n", File.CachedNodes.Diagnostics.size());
 
@@ -722,7 +787,8 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
   }
 }
 
-std::vector<std::string_view> lsp::Server::GetAllEntitiesNamed(std::string_view Name) {
+std::vector<std::string_view>
+lsp::Server::GetAllEntitiesNamed(std::string_view Name) {
   std::vector<std::string_view> Entities;
   for (auto &File : Files) {
     const auto &ToAdd = File.second.CachedNodes.Entities[Name];

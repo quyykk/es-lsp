@@ -353,6 +353,35 @@ const std::unordered_map<std::string_view, lsp::NodeDefinition>
                          .ParameterTypes = {Double}}}}}}, // TODO: finish
         }};
 
+const std::unordered_map<std::string_view,
+                         std::unordered_map<std::string_view, std::string_view>>
+    lsp::NodeTooltips{
+        {"color", {{"color", "<name> <red> <green> <blue> <alpha>"}}},
+        {"conversation", // TODO: Finish
+         {{"conversation", "<name>"},
+          {"scene", "<image>"},
+          {"label", "<name>"},
+          {"choice", ""},
+          {"name", ""},
+          {"branch", "<if true> [if false]"},
+          {"apply", ""}}},
+        {"effect",
+         {{"effect", "<name"},
+          {"scale", "<number#>"},
+          {"frame rate", "<fps#>"},
+          {"start frame", "<number#>"},
+          {"random start frame", ""},
+          {"no repeat", ""},
+          {"rewind", ""},
+          {"sound", "<name>"},
+          {"lifetime", "<frames#>"},
+          {"random lifetime", "<frames#>"},
+          {"velocity scale", "<scale#>"},
+          {"random velocity", "<velocity#>"},
+          {"random angle", "<degrees#>"},
+          {"random spin", "<degrees#>"},
+          {"random frame rate", "<fps#>"}}}};
+
 lsp::Type lsp::Type::FromString(std::string_view String) noexcept {
   // Try to parse as a number. If it's not a number then it's a string.
   // [+-]?[0-9]*[.]?[0-9]*([eE][+-]?[0-9]*)?

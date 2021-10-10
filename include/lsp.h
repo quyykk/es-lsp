@@ -84,6 +84,7 @@ private:
   void DidChange(const json::Value &Id, const json::Value &Value);
   void DidClose(const json::Value &Id, const json::Value &Value);
   void Completion(const json::Value &Id, const json::Value &Value);
+  void Hover(const json::Value &Id, const json::Value &Value);
 
   // Sends diagnostics for the given file to the client.
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
