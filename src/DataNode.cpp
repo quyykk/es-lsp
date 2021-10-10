@@ -166,6 +166,8 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
            "empty lines should have been skipped before");
 
     CheckLine(Result.Diagnostics, Previous);
+    if (!Indent && Node->Parameters.size() >= 2)
+      Result.Entities[Node->Parameters[0]].emplace_back(Node->Parameters[1]);
 
     // Skip to the end of the line if this is a comment.
     if (Text[I] == '#')

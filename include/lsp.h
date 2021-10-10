@@ -89,6 +89,8 @@ private:
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
   // Loads a whole workspace of data files from the given workspace.
   void LoadFromWorkspace(const Workspace &Workspace);
+  // Returns the list of defined entities of the given type.
+  std::vector<std::string_view> GetAllEntitiesNamed(std::string_view Name);
 
 private:
   // Whether the server is initialized (i.e. received the 'initialize' request).

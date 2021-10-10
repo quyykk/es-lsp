@@ -618,6 +618,12 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     Candidates.reserve(Type.Keywords.size());
     for (const auto &Keyword : Type.Keywords)
       Candidates.emplace_back(Keyword);
+
+    // We might have an annotated string instead.
+    if (Type.Keywords.empty() && !Type.Annotation.empty()) {
+      for (const auto &Str : GetAllEntitiesNamed(Type.Annotation))
+        Candidates.emplace_back(Str);
+    }
   }
 
   // Now that we have the candidate list, send it to the client.
@@ -714,4 +720,13 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
     // Workspace files are always error checked.
     UpdateDiagnosticsFor(Workspace.Path, File);
   }
+}
+
+std::vector<std::string_view> lsp::Server::GetAllEntitiesNamed(std::string_view Name) {
+  std::vector<std::string_view> Entities;
+  for (auto &File : Files) {
+    const auto &ToAdd = File.second.CachedNodes.Entities[Name];
+    Entities.insert(Entities.end(), ToAdd.begin(), ToAdd.end());
+  }
+  return Entities;
 }

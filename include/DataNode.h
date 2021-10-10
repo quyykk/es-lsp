@@ -58,6 +58,8 @@ struct RootDataNode final {
   std::unordered_map<int, DataNode> Nodes;
   // Any diagnostics are stored here.
   std::vector<Diagnostic> Diagnostics;
+  // A map of entities of a given type, for examples outfits and systems.
+  std::unordered_map<std::string_view, std::vector<std::string_view>> Entities;
 
   // The file path of this node definition.
   std::string Path;
