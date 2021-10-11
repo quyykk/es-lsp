@@ -370,7 +370,7 @@ const std::unordered_map<
           {"branch", {"<if true> [if false]", ""}},
           {"apply", {"", ""}}}},
         {"effect",
-         {{"effect", {"<name", ""}},
+         {{"effect", {"<name>", ""}},
           {"scale", {"<number#>", ""}},
           {"frame rate", {"<fps#>", "frames per second"}},
           {"start frame", {"<number#>", ""}},
@@ -385,7 +385,8 @@ const std::unordered_map<
             "Without this, an effect will have the same velocity as the ship "
             "or projectile that \\\"created\\\" it. If this is defined, its "
             "velocity will be multiplied by this amount. Use a negative number "
-            "to have the effect \\\"bounce\\\" in the opposite direction from the "
+            "to have the effect \\\"bounce\\\" in the opposite direction from "
+            "the "
             "projectile."}},
           {"random velocity", {"<velocity#>", ""}},
           {"random angle", {"<degrees#>", ""}},

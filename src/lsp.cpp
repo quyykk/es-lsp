@@ -694,7 +694,7 @@ void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
   if (!Def)
     return SendResult(Id, "null");
 
-  auto *ParentNode = It->second.Parent;
+  auto *ParentNode = It->second.Parent ? It->second.Parent : &It->second;
   while (ParentNode->Parent)
     ParentNode = ParentNode->Parent;
   // Now we just need to display the required docs to the client.
