@@ -848,6 +848,12 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
         MarkToken(Node.Columns[I] - IsQuoted,
                   Node.Parameters[I].size() + 2 * IsQuoted, Token, Modifier);
       }
+
+      // After all the parameters there might be a comment.
+      auto CommentStart =
+          Line.find('#', Node.Columns.back() + Node.Parameters.back().size());
+      if (CommentStart != std::string::npos)
+        MarkAsComment(CommentStart, Line.size());
     }
   }
 
