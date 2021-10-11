@@ -11,3 +11,9 @@ $ meson build --buildtype release # creates a build directory for the 'release' 
 $ cd build
 $ ninja
 ```
+
+You can run tests with `ninja` like follows:
+
+```bash
+$ ninja test
+```
