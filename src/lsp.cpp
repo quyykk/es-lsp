@@ -645,8 +645,7 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     "textEdit": {{ "newText": "\"{}\"", "replace": {} }}
 }})",
         Candidate, IsCurrent,
-        std::string(Node.Parameters[Index]) + std::string(Candidate),
-        Candidate,
+        std::string(Node.Parameters[Index]) + std::string(Candidate), Candidate,
         RangeToJson(
             {Node.Line, Node.Columns[Index]},
             {Node.Line, Node.Columns[Index] + Node.Parameters[Index].size()}));
@@ -705,8 +704,10 @@ void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
     return SendResult(Id, "null");
 
   std::string Message =
-      fmt::format("{} {}\\n___\\n*{}*", Tooltip->first, Tooltip->second.first,
-                  Tooltip->second.second);
+      Tooltip->second.second.empty()
+          ? fmt::format("{} {}", Tooltip->first, Tooltip->second.first)
+          : fmt::format("{} {}\\n___\\n*{}*", Tooltip->first,
+                        Tooltip->second.first, Tooltip->second.second);
 
   SendResult(
       Id, fmt::format(R"(
