@@ -583,6 +583,13 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     // TODO: This code is duplicated.
     std::string Array;
     for (const auto &Candidate : Candidates) {
+      std::string Insert(Candidate);
+
+      // Root level nodes are never quoted.
+      if (Indent) {
+        Insert = "\\\"" + Insert;
+        Insert += "\\\"";
+      }
       Array += fmt::format(
           R"(
 {{
@@ -590,9 +597,9 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     "kind": 14,
     "detail": "this is detail",
     "documentation": "documentation yay",
-    "insertText": "\"{}\""
+    "insertText": "{}"
 }})",
-          Candidate, Candidate);
+          Candidate, Insert);
       Array += ',';
     }
     if (!Candidates.empty())
@@ -657,7 +664,10 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
   for (const auto &Candidate : Candidates) {
     const bool IsCurrent = Candidate == Node.Parameters[Index];
     std::string NewText(Candidate);
-    if (!Node.Quoted[Index]) {
+
+    // Always add quotes except for root nodes and if the parameter
+    // already has quotes.
+    if (!Node.Quoted[Index] && Node.Parent) {
       NewText = "\\\"" + NewText;
       NewText += "\\\"";
     }
