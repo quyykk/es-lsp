@@ -403,14 +403,20 @@ lsp::Type lsp::Type::FromString(std::string_view String) noexcept {
   bool Decimal = false;
   if (String[I] == '+' || String[I] == '-')
     ++I;
+  if (I == String.size())
+    return {Type::String};
   while (I < String.size() && String[I] >= '0' && String[I] <= '9')
     ++I;
+  if (I == String.size())
+    return {Type::Int};
   if (String[I] == '.') {
     ++I;
     Decimal = true;
   }
   while (I < String.size() && String[I] >= '0' && String[I] <= '9')
     ++I;
+  if (I == String.size())
+    return {Type::Double};
   if (String[I] == 'e' || String[I] == 'E') {
     if (String[I] == '+' || String[I] == '-')
       ++I;
