@@ -20,3 +20,7 @@ jobs:
           CXX=g++-10 meson build
           cd build
           ninja
+      - name: Run tests
+        run: |
+          cd build
+          ninja test
