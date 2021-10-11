@@ -190,7 +190,9 @@ void lsp::Server::HandleNotification(std::string Message) {
 
   // Unknown method.
   LogError(">> Unknown method '{}'.\n", *Method);
-  return SendError(MethodNotFound, "Method not found", Id->value);
+  if (Id != Doc.MemberEnd())
+    return SendError(MethodNotFound, "Method not found", Id->value);
+  return SendError(MethodNotFound, "Notification not found");
 }
 
 void lsp::Server::LoadFromDirectory(std::string_view Path) {
@@ -645,6 +647,10 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     if (!Node.Definition)
       // Not much we can autocomplete if the node is invalid.
       return SendResult(Id, "[]");
+    if (Index - 1 >= Node.Definition->ParameterTypes.size())
+      // Not much to do if there the argument is out of range.
+      return SendResult(Id, "[]");
+
     // We inspect the type of the parameter to figure out what to autocomplete.
     // This is only relevant for keywords.
     const auto &Type = Node.Definition->ParameterTypes[Index - 1];
