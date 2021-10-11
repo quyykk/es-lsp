@@ -28,17 +28,20 @@ int main(int Argc, char *Argv[]) {
 
   // Handle command line arguments.
   std::string_view ResourcePath;
+  bool LogFlag = false;
   for (std::string_view Arg : Args) {
     if (Arg == "-v" || Arg == "--version") {
       lsp::Log(">> es-lsp v1.0\n");
       return 0;
-    } else if (Arg == "--log") {
-      // Clear existing log file.
-      std::fclose(std::fopen("es-lsp.log", "w"));
-      lsp::Enable();
-    } else if (Arg.starts_with("-"))
+    } else if (Arg == "--log")
+      LogFlag = true;
+    else if (Arg.starts_with("-"))
       lsp::LogError(">> Unknown argument '{}'.\n", Arg);
-    else
+    else if (LogFlag) {
+      if (!lsp::Enable(Arg))
+        lsp::LogError(">> Couldn't open log file '{}'.\n", Arg);
+      LogFlag = false;
+    } else
       ResourcePath = Arg;
   }
 
