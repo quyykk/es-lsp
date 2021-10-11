@@ -953,7 +953,8 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
     File.CachedNodes = LoadFromFile(FsPath);
 
     // Workspace files are always error checked.
-    UpdateDiagnosticsFor(Workspace.Path, File);
+    if (Initialized)
+      UpdateDiagnosticsFor(Workspace.Path, File);
   }
 }
 
