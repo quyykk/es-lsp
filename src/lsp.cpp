@@ -566,9 +566,10 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     "label": "{}",
     "kind": 14,
     "detail": "this is detail",
-    "documentation": "documentation yay"
+    "documentation": "documentation yay",
+    "insertText": "\"{}\""
 }})",
-          Candidate);
+          Candidate, Candidate);
       Array += ',';
     }
     if (!Candidates.empty())
@@ -641,12 +642,11 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     "documentation": "documentation yay",
     "preselect": {},
     "filterText": "{}",
-    "textEdit": {{ "newText": "{}", "replace": {} }}
+    "textEdit": {{ "newText": "\"{}\"", "replace": {} }}
 }})",
         Candidate, IsCurrent,
         std::string(Node.Parameters[Index]) + std::string(Candidate),
-        "\\\"" + std::string(Candidate) + "\\\"",
-        // FIXME: Why doesn't VSCode replace the whole word?
+        Candidate,
         RangeToJson(
             {Node.Line, Node.Columns[Index]},
             {Node.Line, Node.Columns[Index] + Node.Parameters[Index].size()}));
