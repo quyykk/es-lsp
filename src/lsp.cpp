@@ -564,7 +564,7 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       Candidates.reserve(Definitions.size());
       for (const auto &Def : Definitions)
         Candidates.emplace_back(Def.first);
-    } else if (ParentLine == -1)
+    } else if (ParentLine == (std::size_t)-1)
       return SendResult(Id, "[]");
     else {
       const auto &ChildrenIt =
@@ -617,7 +617,7 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       break;
     }
   }
-  if (Index == -1)
+  if (Index == (std::size_t)-1)
     return SendResult(Id, "[]");
 
   std::vector<std::string_view> Candidates;
@@ -780,7 +780,8 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
   Tokens.reserve(FileIt->second.Content.size());
 
   std::size_t LineIndex = -1;
-  auto MarkToken = [&Tokens, &LineIndex, PrevLine = 0, PrevStart = 0](
+  auto MarkToken = [&Tokens, &LineIndex, PrevLine = std::size_t(),
+                    PrevStart = std::size_t()](
                        std::size_t Start, std::size_t Length, TokenTypes Type,
                        ModifierTypes Modifiers) mutable {
     Tokens.reserve(Tokens.size() + 5);
