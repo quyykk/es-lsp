@@ -171,7 +171,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
       Result.Entities[Node->Parameters[0]].emplace_back(Node->Parameters[1]);
 
     // Skip to the end of the line if this is a comment.
-    if (Text[I] == '#')
+    if (I < Text.size() && Text[I] == '#')
       while (I < Text.size() && Text[I] != '\n')
         ++I;
     // We finished parsing the line, on to the next one.
