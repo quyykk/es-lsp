@@ -11,9 +11,19 @@
 #include "log.h"
 #include "lsp.h"
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 namespace fs = std::filesystem;
 
 int main(int Argc, char *Argv[]) {
+#ifdef _WIN32
+  // Disables \r\n for Windows.
+  _setmode(1, _O_BINARY);
+#endif
+
   std::span Args(Argv + 1, Argc - 1);
 
   // Handle command line arguments.
