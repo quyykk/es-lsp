@@ -14,7 +14,7 @@ std::vector<std::string> lsp::TextToLines(std::string_view Text) {
   do {
     NewLine = Text.find('\n', NewLine + 1);
     Result.emplace_back(Text.substr(OldPos, NewLine - OldPos));
-    OldPos = NewLine;
+    OldPos = NewLine + 1;
   } while (NewLine != std::string::npos);
 
   return Result;

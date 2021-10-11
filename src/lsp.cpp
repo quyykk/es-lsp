@@ -180,9 +180,12 @@ void lsp::Server::HandleNotification(std::string Message) {
   // TODO: 'textDocument/colorPresentation'
   // TODO: 'textDocument/rename'
   // TODO: 'textDocument/foldingRange'
-  // TODO: 'textDocument/semanticTokens/full'
-  // TODO: 'textDocument/semanticTokens/full/delta'
-  // TODO: 'textDocument/semanticTokens/range'
+  if (*Method == "textDocument/semanticTokens/full")
+    return SemanticTokensFull(Id->value, ParamsVal->value);
+  if (*Method == "textDocument/semanticTokens/full/delta")
+    return SemanticTokensRange(Id->value, ParamsVal->value);
+  if (*Method == "textDocument/semanticTokens/range")
+    return SemanticTokensRange(Id->value, ParamsVal->value);
   // TODO: 'textDocument/linkedEditingRange'
 
   // Unknown method.
@@ -284,17 +287,37 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
 
   // Tell the client that we are initialized.
   Initialized = true;
-  SendResult(Id, R"(
-{
+
+  std::string TokenTypes;
+  for (const auto &Token : Tokens) {
+    TokenTypes += '"';
+    TokenTypes += Token;
+    TokenTypes += "\",";
+  }
+  TokenTypes.pop_back();
+
+  std::string TokenModifiers;
+  for (const auto &Modifier : Modifiers) {
+    TokenModifiers += '"';
+    TokenModifiers += Modifier;
+    TokenModifiers += "\",";
+  }
+  TokenModifiers.pop_back();
+
+  SendResult(Id, fmt::format(R"(
+{{
     "capabilities":
-    {
-          "textDocumentSync": { "openClose": true, "change": 1 },
-          "workspace": { "workspaceFolders": { "supported": true, "changeNotifications": true }},
-          "completionProvider": {},
-          "hoverProvider": {}
-    },
-    "serverInfo": { "name": "es-lsp", "version": "v1.0" }
-})");
+    {{
+          "textDocumentSync": {{ "openClose": true, "change": 1 }},
+          "workspace": {{ "workspaceFolders": {{ "supported": true, "changeNotifications": true }} }},
+          "completionProvider": {{}},
+          "hoverProvider": {{}},
+          "semanticTokensProvider": {{ "legend": {{ "tokenTypes": [{}], "tokenModifiers": [{}] }},
+              "full": true }}
+    }},
+    "serverInfo": {{ "name": "es-lsp", "version": "v1.0" }}
+}})",
+                             TokenTypes, TokenModifiers));
   Log(">> 'initialize' done!\n");
 }
 
@@ -727,6 +750,147 @@ void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
                                        It->second.Parameters.front().size()})));
   Log(">> 'textDocument/hover' done!\n");
 }
+
+void lsp::Server::SemanticTokensFull(const json::Value &Id,
+                                     const json::Value &Value) {
+  Log(">> Processing 'textDocument/semanticTokens/full'.\n");
+  auto TextDocument = Value.FindMember("textDocument");
+  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
+    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
+  auto Path = GetString(TextDocument->value, "uri");
+  if (!Path)
+    return SendError(ParseError, "Error parsing 'uri' field", Id);
+
+  const auto FsPath = UriToFsPath(*Path);
+  auto FileIt = Files.find(FsPath);
+  if (FileIt == Files.end())
+    return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
+                     Id);
+
+  // Stores the list of completion tokens for the client. Every token has 5
+  // entries in this array (so for N tokens this array has size 5 * N).
+  //   - Line
+  //   - Start Column
+  //   - Length
+  //   - Token Type
+  //   - Token Modifier(s)
+  std::vector<int> Tokens;
+
+  // Conversative guess: Every line has a single token.
+  Tokens.reserve(FileIt->second.Content.size());
+
+  std::size_t LineIndex = -1;
+  auto MarkToken = [&Tokens, &LineIndex, PrevLine = 0, PrevStart = 0](
+                       std::size_t Start, std::size_t Length, TokenTypes Type,
+                       ModifierTypes Modifiers) mutable {
+    Tokens.reserve(Tokens.size() + 5);
+
+    // We need to perform a delta to the previous position.
+    Tokens.push_back(LineIndex > PrevLine ? LineIndex - PrevLine : 0);
+    Tokens.push_back(LineIndex == PrevLine ? Start - PrevStart : Start);
+
+    Tokens.push_back(Length);
+    Tokens.push_back((int)Type);
+    Tokens.push_back((int)Modifiers);
+
+    PrevStart = Start;
+    PrevLine = LineIndex;
+  };
+  const auto MarkAsComment = [&MarkToken](std::size_t Start, std::size_t End) {
+    MarkToken(Start, End - Start, TokenTypes::Comment, ModifierTypes::None);
+  };
+
+  // We go through every single line of the file and generate the required
+  // tokens.
+  for (const auto &Line : FileIt->second.Content) {
+    ++LineIndex;
+
+    auto First = Line.find_first_not_of(" \f\t\v\r\n");
+    if (First == std::string::npos)
+      // This line is completely empty.
+      continue;
+    if (Line[First] == '#') {
+      MarkAsComment(First, Line.size());
+      continue;
+    }
+
+    auto NodeIt = FileIt->second.CachedNodes.Nodes.find(LineIndex);
+    if (NodeIt != FileIt->second.CachedNodes.Nodes.end()) {
+      const auto &Node = NodeIt->second;
+
+      // Since this line has a valid DataNode, we can color the first parameter.
+      const auto Indent = std::count(Line.begin(), Line.end(), '\t');
+
+      // A root node is marked as a 'class', else it's a 'property'.
+      const bool IsRoot = !Indent;
+      bool IsQuoted = Node.Quoted.front();
+      MarkToken(Node.Columns.front() - IsQuoted,
+                Node.Parameters.front().size() + 2 * IsQuoted,
+                !IsRoot ? TokenTypes::Class : TokenTypes::Keyword,
+                ModifierTypes::None);
+
+      // Now we need to mark all of the parameters.
+      // TODO: We parse parameters here *again* (the first time they are parsed
+      // for type checking). It makes sense to store the parsed type so that we
+      // can reuse it here.
+      for (std::size_t I = 1; I < Node.Parameters.size(); ++I) {
+        auto ParamType = Type::FromString(Node.Parameters[I]);
+        auto Token = ParamType.Kind == Type::String ? TokenTypes::String
+                                                    : TokenTypes::Number;
+        auto Modifier = ModifierTypes::None;
+
+        if (IsRoot && I + 1 == Node.Parameters.size()) {
+          Token = TokenTypes::Variable;
+          Modifier = ModifierTypes::Definition;
+        }
+
+        bool IsQuoted = Node.Quoted[I];
+        MarkToken(Node.Columns[I] - IsQuoted,
+                  Node.Parameters[I].size() + 2 * IsQuoted, Token, Modifier);
+      }
+    }
+  }
+
+  if (Tokens.empty())
+    return SendResult(Id, "[]");
+
+  std::string Array;
+  // To avoid tons of (re)allocations, we guess the size.
+  // Some reasonable upper bounds:
+  //   - Line: 4 (files with more than 4 digits of lines are rare)
+  //   - Column: 2
+  //   - Length: 2
+  //   - Type + Modifier: 2
+  // => 10 per semantic token.
+  Array.resize((10 / 5) * Tokens.size() + Tokens.size());
+  char *It = Array.data();
+  char *End = Array.data() + Array.size();
+  for (auto T : Tokens) {
+    It = std::to_chars(It, End, T).ptr;
+    *It++ = ',';
+
+    // Check if there is enough space left.
+    if (End - It < 10) {
+      // Unfortunately this now requires an expensive reallocation.
+      // We double the size, which should be enough. In most cases, it is too
+      // much.
+      auto Index = It - Array.data();
+      Array.resize(Array.size() * 2);
+      It = Array.data() + Index;
+      End = Array.data() + Array.size();
+    }
+  }
+
+  std::string_view View(Array.data(), It - Array.data() - 1);
+  SendResult(Id, fmt::format(R"({{ "data": [{}] }})", View));
+  Log(">> 'textDocument/semanticTokens/full' done!\n");
+}
+
+void lsp::Server::SemanticTokensDelta(const json::Value &Id,
+                                      const json::Value &Value) {}
+
+void lsp::Server::SemanticTokensRange(const json::Value &Id,
+                                      const json::Value &Value) {}
 
 void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
   Log(">> Processing {} diagnostics.\n", File.CachedNodes.Diagnostics.size());

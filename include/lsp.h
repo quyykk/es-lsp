@@ -30,7 +30,8 @@ struct File {
   // The fs path to the file.
   std::string Path;
 
-  // If the file is opened, this contains the contents of the file, line by line.
+  // If the file is opened, this contains the contents of the file, line by
+  // line.
   std::vector<std::string> Content;
 
   // The version of the file for synchronization purposes with the client.
@@ -56,6 +57,35 @@ struct Location {
   std::size_t Column = 0;
 
   constexpr operator bool() const noexcept { return Line || Column; }
+};
+
+// The semantic tokens + any modifiers. Used for coloring by the client.
+constexpr std::string_view Tokens[] = {
+    "variable", // A reference to another node.
+    "enum",     // The attributes of a node.
+    "class",    // The root name that defines the type of a variable.
+    "comment",  // A comment.
+    "keyword",  // Some attributes have keywords.
+    "number",   // A number.
+    "string",   // A string.
+};
+enum class TokenTypes {
+  Variable,
+  Enum,
+  Class,
+  Comment,
+  Keyword,
+  Number,
+  String,
+};
+constexpr std::string_view Modifiers[] = {
+    "definition", // Defines a variable.
+    "deprecated", // For deprecated things.
+};
+enum class ModifierTypes {
+  None = 0,
+  Definition = 1 << 0,
+  Deprecated = 1 << 1,
 };
 
 // The actual LSP server. It is reponsible for talking to the client.
@@ -85,6 +115,9 @@ private:
   void DidClose(const json::Value &Id, const json::Value &Value);
   void Completion(const json::Value &Id, const json::Value &Value);
   void Hover(const json::Value &Id, const json::Value &Value);
+  void SemanticTokensFull(const json::Value &Id, const json::Value &Value);
+  void SemanticTokensDelta(const json::Value &Id, const json::Value &Value);
+  void SemanticTokensRange(const json::Value &Id, const json::Value &Value);
 
   // Sends diagnostics for the given file to the client.
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
