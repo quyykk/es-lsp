@@ -137,6 +137,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
 
       auto &Param = Node->Parameters.emplace_back();
       Node->Columns.emplace_back(Column);
+      Node->Quoted.emplace_back(Quoted);
       while (I < Text.size() && Text[I] != '\n' &&
              (Quoted ? Text[I] != Quote : Text[I] > ' ')) {
         Param += Text[I++];

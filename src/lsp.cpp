@@ -633,6 +633,11 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
   std::string Array;
   for (const auto &Candidate : Candidates) {
     const bool IsCurrent = Candidate == Node.Parameters[Index];
+    std::string NewText(Candidate);
+    if (!Node.Quoted[Index]) {
+      NewText = "\\\"" + NewText;
+      NewText += "\\\"";
+    }
     Array += fmt::format(
         R"(
 {{
@@ -642,10 +647,10 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     "documentation": "documentation yay",
     "preselect": {},
     "filterText": "{}",
-    "textEdit": {{ "newText": "\"{}\"", "replace": {} }}
+    "textEdit": {{ "newText": "{}", "range": {} }}
 }})",
         Candidate, IsCurrent,
-        std::string(Node.Parameters[Index]) + std::string(Candidate), Candidate,
+        std::string(Node.Parameters[Index]) + std::string(Candidate), NewText,
         RangeToJson(
             {Node.Line, Node.Columns[Index]},
             {Node.Line, Node.Columns[Index] + Node.Parameters[Index].size()}));

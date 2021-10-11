@@ -19,6 +19,8 @@ namespace lsp {
 struct DataNode final {
   // This includes the <name> and the <parameters>.
   std::vector<std::string> Parameters;
+  // Whether any parameter is quoted inside the file.
+  std::vector<bool> Quoted;
   // Any children of this data node.
   std::vector<DataNode *> Children;
   // The parent, if any.
