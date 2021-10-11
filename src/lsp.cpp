@@ -978,11 +978,13 @@ void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
   // Now that we have an entity with an annotation, we can send all of its
   // definitions to the client.
   auto Entities = GetAllEntitiesNamed(Annotation);
-  if (Entities.empty())
-    return SendResult(Id, "null");
 
   std::string Array;
   for (const auto &Entity : Entities) {
+    // Filter out any entities that don't have the same name.
+    if (Entity.second->Node->Parameters[1] != Node.Parameters[Index])
+      continue;
+
     const auto &DestNode = *Entity.second->Node;
     Array += fmt::format(
         R"(
@@ -1002,6 +1004,8 @@ void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
                     {DestNode.Line, DestNode.Columns[Index] +
                                         DestNode.Parameters[Index].size()}));
   }
+  if (Array.empty())
+    return SendResult(Id, "null");
   Array.pop_back();
 
   SendResult(Id, fmt::format("[{}]", Array));
