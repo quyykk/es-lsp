@@ -118,13 +118,15 @@ private:
   void SemanticTokensFull(const json::Value &Id, const json::Value &Value);
   void SemanticTokensDelta(const json::Value &Id, const json::Value &Value);
   void SemanticTokensRange(const json::Value &Id, const json::Value &Value);
+  void Goto(const json::Value &Id, const json::Value &Value);
 
   // Sends diagnostics for the given file to the client.
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
   // Loads a whole workspace of data files from the given workspace.
   void LoadFromWorkspace(const Workspace &Workspace);
   // Returns the list of defined entities of the given type.
-  std::vector<std::string_view> GetAllEntitiesNamed(std::string_view Name);
+  std::vector<std::pair<std::string_view, const Entity *>>
+  GetAllEntitiesNamed(std::string_view Name);
 
 private:
   // Whether the server is initialized (i.e. received the 'initialize' request).

@@ -16,6 +16,8 @@ namespace lsp {
 // <name> <parameters>...
 //     <children>
 //     ...
+// TODO: Add a 'name' field (maybe an index) so that we know which parameter is
+// the actual name if this is a definition node.
 struct DataNode final {
   // This includes the <name> and the <parameters>.
   std::vector<std::string> Parameters;
@@ -54,6 +56,14 @@ struct Diagnostic {
   std::string Message;
 };
 
+// Stores an entity definition, for example a defined 'outfit'.
+struct Entity {
+  // The DataNode corresponding to the root node for this entity.
+  const DataNode *Node;
+  // The last line of this entity. This is the last line of the last attribute.
+  std::size_t LastLine;
+};
+
 // Stores all of the DataNodes of a file as well as related data.
 struct RootDataNode final {
   // The data inside this file.
@@ -61,7 +71,7 @@ struct RootDataNode final {
   // Any diagnostics are stored here.
   std::vector<Diagnostic> Diagnostics;
   // A map of entities of a given type, for examples outfits and systems.
-  std::unordered_map<std::string_view, std::vector<std::string_view>> Entities;
+  std::unordered_map<std::string_view, std::vector<Entity>> Entities;
 
   // The file path of this node definition.
   std::string Path;

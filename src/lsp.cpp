@@ -170,8 +170,9 @@ void lsp::Server::HandleNotification(std::string Message) {
   if (*Method == "textDocument/hover")
     return Hover(Id->value, ParamsVal->value);
   // TODO: 'textDocument/signatureHelp'
-  // TODO: 'textDocument/declaration'
-  // TODO: 'textDocument/definition'
+  if (*Method == "textDocument/declaration" ||
+      *Method == "textDocument/definition")
+    return Goto(Id->value, ParamsVal->value);
   // TODO: 'textDocument/implementation'
   // TODO: 'textDocument/references'
   // TODO: 'textDocument/documentHighlight'
@@ -315,7 +316,9 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
           "completionProvider": {{}},
           "hoverProvider": {{}},
           "semanticTokensProvider": {{ "legend": {{ "tokenTypes": [{}], "tokenModifiers": [{}] }},
-              "full": true }}
+              "full": true }},
+          "declarationProvider": {{}},
+          "definitionProvider": {{}}
     }},
     "serverInfo": {{ "name": "es-lsp", "version": "v1.0" }}
 }})",
@@ -661,7 +664,9 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     // We might have an annotated string instead.
     if (Type.Keywords.empty() && !Type.Annotation.empty()) {
       for (const auto &Str : GetAllEntitiesNamed(Type.Annotation))
-        Candidates.emplace_back(Str);
+        // FIXME: This is wrong for definitions with name in third place
+        // ('ship').
+        Candidates.emplace_back(Str.second->Node->Parameters[1]);
     }
   }
 
@@ -915,6 +920,94 @@ void lsp::Server::SemanticTokensDelta(const json::Value &Id,
 void lsp::Server::SemanticTokensRange(const json::Value &Id,
                                       const json::Value &Value) {}
 
+void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
+  Log(">> Processing 'textDocument/{{declaration,definition}}'.\n");
+
+  auto TextDocument = Value.FindMember("textDocument");
+  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
+    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
+  auto Path = GetString(TextDocument->value, "uri");
+  if (!Path)
+    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  auto PositionField = Value.FindMember("position");
+  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
+    return SendError(ParseError, "Error parsing 'position' field", Id);
+
+  auto FsPath = UriToFsPath(*Path);
+  auto Position = ParseLocation(PositionField->value);
+  if (!Position)
+    return SendError(ParseError, "Error parsing inner 'position' field", Id);
+
+  auto FileIt = Files.find(FsPath);
+  if (FileIt == Files.end())
+    return SendError(InvalidRequest, "goto wanted on unloaded file", Id);
+
+  auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
+  if (It == FileIt->second.CachedNodes.Nodes.end())
+    return SendResult(Id, "null");
+  const auto &Node = It->second;
+
+  // Figure out what parameter we are autocompleting.
+  // TODO: Tons of code duplication here and elsewhere.
+  std::size_t Index = -1;
+  for (std::size_t I = 0; I < Node.Parameters.size(); ++I) {
+    if (Node.Columns[I] == Position->Column) {
+      Index = I;
+      break;
+    } else if (Position->Column > Node.Columns[I] &&
+               Position->Column <=
+                   Node.Columns[I] + Node.Parameters[I].size()) {
+      Index = I;
+      break;
+    }
+  }
+  if (Index == (std::size_t)-1)
+    return SendResult(Id, "null");
+
+  if (!Node.Definition || !Index)
+    // If the node is invalid or it is the root (roots don't have a type), then
+    // there is nothing to do.
+    return SendResult(Id, "null");
+
+  auto Annotation = Node.Definition->ParameterTypes[Index - 1].Annotation;
+  // Now that we have an index we can inspect it. Goto on anything but entities
+  // doesn't make any sense.
+  if (Annotation.empty())
+    return SendResult(Id, "null");
+
+  // Now that we have an entity with an annotation, we can send all of its
+  // definitions to the client.
+  auto Entities = GetAllEntitiesNamed(Annotation);
+  if (Entities.empty())
+    return SendResult(Id, "null");
+
+  std::string Array;
+  for (const auto &Entity : Entities) {
+    const auto &DestNode = *Entity.second->Node;
+    Array += fmt::format(
+        R"(
+{{
+    "originSelectionRange": {},
+    "targetUri": "file://{}",
+    "targetRange": {},
+    "targetSelectionRange": {}
+}},)",
+        RangeToJson(
+            {Node.Line, Node.Columns[Index]},
+            {Node.Line, Node.Columns[Index] + Node.Parameters[Index].size()}),
+        Entity.first,
+        RangeToJson({DestNode.Line, DestNode.Columns.front()},
+                    {Entity.second->LastLine}),
+        RangeToJson({DestNode.Line, DestNode.Columns[Index]},
+                    {DestNode.Line, DestNode.Columns[Index] +
+                                        DestNode.Parameters[Index].size()}));
+  }
+  Array.pop_back();
+
+  SendResult(Id, fmt::format("[{}]", Array));
+  Log(">> 'textDocument/{{declaration,definition}}' done!\n");
+}
+
 void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
   Log(">> Processing {} diagnostics.\n", File.CachedNodes.Diagnostics.size());
 
@@ -981,12 +1074,14 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
   }
 }
 
-std::vector<std::string_view>
+std::vector<std::pair<std::string_view, const lsp::Entity *>>
 lsp::Server::GetAllEntitiesNamed(std::string_view Name) {
-  std::vector<std::string_view> Entities;
+  std::vector<std::pair<std::string_view, const Entity *>> Entities;
   for (auto &File : Files) {
     const auto &ToAdd = File.second.CachedNodes.Entities[Name];
-    Entities.insert(Entities.end(), ToAdd.begin(), ToAdd.end());
+    Entities.reserve(Entities.size() + ToAdd.size());
+    for (const auto &Element : ToAdd)
+      Entities.emplace_back(File.second.Path, &Element);
   }
   return Entities;
 }

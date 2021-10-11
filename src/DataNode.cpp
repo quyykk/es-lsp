@@ -75,6 +75,10 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
 
   std::size_t Line = -1;
   std::size_t Column;
+  // Used to update the last line of a entity definition.
+  std::size_t *LastEntityLine = nullptr;
+  std::size_t LastNonEmptyLine = -1;
+
   // Parse file contents into a DataNode.
   for (std::size_t I = 0; I < Text.size(); ++I) {
     ++Line;
@@ -99,6 +103,8 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     if (Text[I] == '\n')
       continue;
 
+    LastNonEmptyLine = Line;
+
     // If this line has no indentation, then it is a root node.
     // If it does, we need to check which node is its parent.
     DataNode *Node;
@@ -107,6 +113,13 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
       Indents.clear();
       Node = &Result.Nodes[Line];
       Node->Parent = nullptr;
+
+      // We have the definition of a new entity, so if there was a last entity
+      // definition we can now update its last line.
+      if (LastEntityLine) {
+        *LastEntityLine = LastNonEmptyLine;
+        LastEntityLine = nullptr;
+      }
     } else {
       // Choose the correct parent node.
       while (Indents.back() >= Indent) {
@@ -168,7 +181,10 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
 
     CheckLine(Result.Diagnostics, Previous);
     if (!Indent && Node->Parameters.size() >= 2)
-      Result.Entities[Node->Parameters[0]].emplace_back(Node->Parameters[1]);
+      // The last line of this entity is only known when we parsed the next
+      // entity, so we need to update it later.
+      LastEntityLine =
+          &Result.Entities[Node->Parameters[0]].emplace_back(Node, 0).LastLine;
 
     // Skip to the end of the line if this is a comment.
     if (I < Text.size() && Text[I] == '#')
@@ -176,6 +192,11 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
         ++I;
     // We finished parsing the line, on to the next one.
   }
+
+  // We have reached the end of the file. We now must update the last line of
+  // the last entity definition.
+  if (LastEntityLine)
+    *LastEntityLine = Line;
 
   return Result;
 }
