@@ -157,8 +157,16 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
         ++Column;
       }
 
-      if (I == Text.size())
+      if (Text[I] == '\n' || I == Text.size()) {
+        if (Quoted) {
+          // If this parameter is quoted then there's a missing quotation mark.
+          auto &Diag = Result.Diagnostics.emplace_back(
+              *Node, Node->Parameters.size() - 1);
+          Diag.Kind = Diagnostic::Error;
+          Diag.Message = fmt::format("Missing '\\{}' end quote", Quote);
+        }
         break;
+      }
 
       // Eat last quote.
       if (Quoted) {
