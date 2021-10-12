@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <filesystem>
 
 std::string lsp::UriToFsPath(std::string_view Uri) {
   // Strip "file://" prefix from the uri.
@@ -26,4 +27,31 @@ std::size_t lsp::CountLineIndentation(std::string_view Line,
     // This line is empty.
     return AllowEmptyLines ? Line.size() : 0;
   return End;
+}
+
+std::vector<std::string> lsp::FindESData(const fs::path &Path) {
+  if (!fs::exists(Path) || !fs::is_directory(Path))
+    return {};
+  std::vector<std::string> Files;
+
+  // If the directory has a 'data/' folder, then we only load files inside
+  // inside 'data/'. If it doesn't, assume every .txt file is an ES data file.
+  auto DataDir = Path / "data";
+  const bool HasDataDirectory =
+      fs::exists(DataDir) && fs::is_directory(DataDir);
+
+  for (const auto &File :
+       fs::recursive_directory_iterator(HasDataDirectory ? DataDir : Path)) {
+    // Skip any directory.
+    if (File.is_directory())
+      continue;
+
+    const auto &FilePath = File.path();
+    // If this isn't the 'data/' dir, we must check the extension.
+    if (!HasDataDirectory && FilePath.extension() != ".txt")
+      continue;
+    Files.emplace_back(FilePath.string());
+  }
+
+  return Files;
 }

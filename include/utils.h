@@ -1,9 +1,12 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 namespace lsp {
 
@@ -18,6 +21,9 @@ std::vector<std::string> TextToLines(std::string_view Text);
 // Counts the indentation of the passed line.
 std::size_t CountLineIndentation(std::string_view Line,
                                  bool AllowEmptyLines = false);
+
+// Finds relevant ES data file inside a directory.
+std::vector<std::string> FindESData(const fs::path &Path);
 
 } // namespace lsp
 

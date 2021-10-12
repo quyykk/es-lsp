@@ -197,24 +197,19 @@ void lsp::Server::HandleNotification(std::string Message) {
 }
 
 void lsp::Server::LoadFromDirectory(std::string_view Path) {
-  if (!fs::exists(Path) || !fs::is_directory(Path))
-    return;
+  auto DataFiles = FindESData(Path);
 
-  for (const auto &Path : fs::recursive_directory_iterator(Path)) {
-    if (Path.is_directory())
-      continue;
-
-    const std::string FsPath = Path.path().string().c_str();
-    if (Files.find(FsPath) != Files.end())
+  for (const auto &Path : DataFiles) {
+    if (Files.find(Path) != Files.end())
       // The file already exists. Either the file was opened explicitly by the
       // client, or it was opened as part of a workspace or the resource
       // directory.
       // We don't really need to do anything.
       continue;
 
-    auto &File = Files[FsPath];
-    File.Path = FsPath;
-    File.CachedNodes = LoadFromFile(FsPath);
+    auto &File = Files[Path];
+    File.Path = Path;
+    File.CachedNodes = LoadFromFile(Path);
   }
 }
 
@@ -1067,15 +1062,10 @@ void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
 }
 
 void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
-  if (!fs::exists(Workspace.Path) || !fs::is_directory(Workspace.Path))
-    return;
+  auto DataFiles = FindESData(Workspace.Path);
 
-  for (const auto &Path : fs::recursive_directory_iterator(Workspace.Path)) {
-    if (Path.is_directory())
-      continue;
-
-    const std::string FsPath = Path.path().string().c_str();
-    auto It = Files.find(FsPath);
+  for (const auto &Path : DataFiles) {
+    auto It = Files.find(Path);
     if (It != Files.end()) {
       // The file is already loaded, but we still need to update its
       // workspace.
@@ -1083,10 +1073,10 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
       continue;
     }
 
-    auto &File = Files[FsPath];
-    File.Path = FsPath;
+    auto &File = Files[Path];
+    File.Path = Path;
     File.Parent = &Workspace;
-    File.CachedNodes = LoadFromFile(FsPath);
+    File.CachedNodes = LoadFromFile(Path);
 
     // Workspace files are always error checked.
     if (Initialized)
