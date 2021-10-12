@@ -960,8 +960,15 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
   for (const auto &Path : fs::recursive_directory_iterator(Workspace.Path)) {
     if (Path.is_directory())
       continue;
+    if (Path.path().filename().string().find(".") == 0)
+      // maybe a .DS_Store on mac
+      continue;
 
     const std::string FsPath = Path.path().string().c_str();
+    if (FsPath.find("/.") != -1 || FsPath.find("\\."))
+      // maybe inside a .git/ directory
+      continue;
+
     auto It = Files.find(FsPath);
     if (It != Files.end()) {
       // The file is already loaded, but we still need to update its
