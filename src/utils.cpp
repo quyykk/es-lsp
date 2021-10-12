@@ -18,3 +18,12 @@ std::vector<std::string> lsp::TextToLines(std::string_view Text) {
 
   return Result;
 }
+
+std::size_t lsp::CountLineIndentation(std::string_view Line,
+                                      bool AllowEmptyLines) {
+  auto End = Line.find_first_not_of(" \f\t\v\r\n");
+  if (End == std::string::npos)
+    // This line is empty.
+    return AllowEmptyLines ? Line.size() : 0;
+  return End;
+}

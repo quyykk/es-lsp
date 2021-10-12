@@ -545,15 +545,15 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       return SendError(InvalidRequest, "line too big", Id);
 
     std::string_view CurrentLine = FileIt->second.Content[Position->Line];
-    const auto Indent = std::count_if(CurrentLine.begin(), CurrentLine.end(),
-                                      [](char C) { return C <= ' '; });
+    const auto Indent =
+        CountLineIndentation(CurrentLine, /*AllowEmptyLines=*/true);
 
     // Calculate line of the parent node.
     std::size_t ParentLine = -1;
     for (auto I = Position->Line - 1; I >= 0; --I) {
       std::string_view Line = FileIt->second.Content[I];
-      const auto LineIndent = std::count_if(Line.begin(), Line.end(),
-                                            [](char C) { return C <= ' '; });
+      const auto LineIndent =
+          CountLineIndentation(Line, /*AllowEmptyLines=*/true);
       if (LineIndent < Indent) {
         // We have the parent, but that's enough.
         ParentLine = I;
@@ -620,12 +620,10 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
   // Figure out what parameter we are autocompleting.
   std::size_t Index = -1;
   for (std::size_t I = 0; I < Node.Parameters.size(); ++I) {
-    if (Node.Columns[I] == Position->Column) {
-      Index = I;
-      break;
-    } else if (Position->Column > Node.Columns[I] &&
-               Position->Column <=
-                   Node.Columns[I] + Node.Parameters[I].size()) {
+    bool IsQuoted = Node.Quoted[I];
+    if (Position->Column >= Node.Columns[I] - IsQuoted &&
+        Position->Column <=
+            Node.Columns[I] + Node.Parameters[I].size() + 2 * IsQuoted) {
       Index = I;
       break;
     }
@@ -671,17 +669,34 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     }
   }
 
+  // Always add quotes except for root nodes, if the parameter
+  // already has quotes and if the cursor is at the start/end of the
+  // parameter.
+  bool AddQuotes = false;
+  bool AddStartQuote = false;
+  bool AddEndQuote = false;
+  if (Node.Parent) {
+    if (!Node.Quoted[Index])
+      AddQuotes = true;
+    if (Position->Column == Node.Columns[Index] - Node.Quoted[Index])
+      AddStartQuote = true;
+    if (Position->Column == Node.Columns[Index] +
+                                Node.Parameters[Index].size() +
+                                Node.Quoted[Index])
+      AddEndQuote = true;
+  }
+
   // Now that we have the candidate list, send it to the client.
   std::string Array;
   for (const auto &Candidate : Candidates) {
     const bool IsCurrent = Candidate == Node.Parameters[Index];
     std::string NewText(Candidate);
 
-    // Always add quotes except for root nodes and if the parameter
-    // already has quotes.
-    if (!Node.Quoted[Index] && Node.Parent) {
-      NewText = "\\\"" + NewText;
-      NewText += "\\\"";
+    if (AddQuotes || AddStartQuote || AddEndQuote) {
+      if (AddQuotes || AddStartQuote)
+        NewText = "\\\"" + NewText;
+      if (AddQuotes || AddEndQuote)
+        NewText += "\\\"";
     }
     Array += fmt::format(
         R"(
