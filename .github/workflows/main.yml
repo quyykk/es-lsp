@@ -15,12 +15,21 @@ jobs:
         run: pip install meson
       - name: Install ninja
         run: sudo apt install ninja-build
-      - name: Build
+      - name: Build (gcc)
         run: |
           CXX=g++-10 meson build
           cd build
           ninja
-      - name: Run tests
+      - name: Run tests (gcc)
         run: |
           cd build
+          ninja test
+      - name: Build (clang)
+        run: |
+          CXX=clang++-12 meson clang
+          cd clang
+          ninja
+      - name: Run tests (clang)
+        run: |
+          cd clang
           ninja test
