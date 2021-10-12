@@ -261,7 +261,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
 
     // It is recommended to use tabs for indentation at all times, so we provide
     // a "hint" to the client.
-    if (LineIndentation != 2) {
+    if (Indent && LineIndentation != 2) {
       auto &Diag = Result.Diagnostics.emplace_back();
       Diag.Line = Line;
       Diag.Column = 0;
