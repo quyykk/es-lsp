@@ -397,8 +397,9 @@ void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
   auto FsPath = UriToFsPath(*Path);
   auto It = Files.find(FsPath);
   if (It != Files.end())
-    ; // The files is already loaded, normally because it is part of a
-      // workspace.
+    UpdateDiagnosticsFor(FsPath,
+                         It->second); // The files is already loaded, normally
+                                      // because it is part of a workspace.
   else {
     // If the file doesn't exist we load it.
     It = Files.emplace(FsPath, File()).first;
