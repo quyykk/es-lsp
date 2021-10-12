@@ -243,6 +243,7 @@ void lsp::Server::SendResult(const json::Value &Id, std::string_view Result) {
     IdStr = "\""s + Id.GetString() + "\"";
   else
     IdStr = fmt::format("{}", Id.GetInt());
+
   auto Message = fmt::format(R"(
 {{
     "jsonrpc": "2.0",
@@ -250,6 +251,8 @@ void lsp::Server::SendResult(const json::Value &Id, std::string_view Result) {
     "result": {}
 }})",
                              IdStr, Result);
+
+  Sanitize(Message);
   fmt::print("Content-Length: {}\r\n\r\n{}", Message.size(), Message);
   Log(">> Sent result: {}\n", Message);
   std::cout.flush();
@@ -265,6 +268,7 @@ void lsp::Server::SendNotification(std::string_view Method,
 }})",
                              Method, Params);
 
+  Sanitize(Message);
   fmt::print("Content-Length: {}\r\n\r\n{}", Message.size(), Message);
   Log(">> Sent notification: {}\n", Message);
   std::cout.flush();

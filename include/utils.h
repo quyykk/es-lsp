@@ -25,6 +25,9 @@ std::size_t CountLineIndentation(std::string_view Line,
 // Finds relevant ES data file inside a directory.
 std::vector<std::string> FindESData(const fs::path &Path);
 
+// Sanitizes a message for JSON parsing.
+void Sanitize(std::string &Message);
+
 } // namespace lsp
 
 #endif

@@ -55,3 +55,12 @@ std::vector<std::string> lsp::FindESData(const fs::path &Path) {
 
   return Files;
 }
+
+void lsp::Sanitize(std::string &Message) {
+  // Remove any tab characters from output.
+  std::size_t Index = 0;
+  while ((Index = Message.find('\t')) != std::string::npos) {
+    Message[Index] = 't';
+    Message.insert(Index, 1, '\\');
+  }
+}
