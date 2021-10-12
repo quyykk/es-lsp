@@ -33,7 +33,7 @@ jobs:
       - name: Install ninja
         run: sudo apt install ninja-build
       - name: Install libc++
-        run: sudo apt install libc++abi1-12 libc++1-12 libc++-12-dev
+        run: sudo apt install libc++abi1 libc++1 libc++-dev
       - name: Build
         run: |
           CXX=clang++-12 meson build
