@@ -171,9 +171,9 @@ void lsp::Server::HandleNotification(std::string Message) {
     return Hover(Id->value, ParamsVal->value);
   // TODO: 'textDocument/signatureHelp'
   if (*Method == "textDocument/declaration" ||
-      *Method == "textDocument/definition")
+      *Method == "textDocument/definition" ||
+      *Method == "textDocument/implementation")
     return Goto(Id->value, ParamsVal->value);
-  // TODO: 'textDocument/implementation'
   // TODO: 'textDocument/references'
   // TODO: 'textDocument/documentHighlight'
   // TODO: 'textDocument/documentSymbol'
@@ -313,7 +313,8 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
           "semanticTokensProvider": {{ "legend": {{ "tokenTypes": [{}], "tokenModifiers": [{}] }},
               "full": true }},
           "declarationProvider": {{}},
-          "definitionProvider": {{}}
+          "definitionProvider": {{}},
+          "implementationProvider": {{}}
     }},
     "serverInfo": {{ "name": "es-lsp", "version": "v1.0" }}
 }})",
