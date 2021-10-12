@@ -1,0 +1,22 @@
+[binaries]
+c = 'emcc'
+cpp = 'em++'
+ar = 'emar'
+exe_wrapper = 'node'
+
+[properties]
+root = '/Users/tomb/emsdk/upstream/emscripten/system'
+c_args = []
+c_link_args = []
+cpp_args = []
+cpp_link_args = ['-s', 'NODERAWFS=1', '-s', 'ALLOW_MEMORY_GROWTH=1']
+shared_lib_suffix = 'js'
+static_lib_suffix = 'js'
+shared_module_suffix = 'js'
+exe_suffix = 'js'
+
+[host_machine]
+system = 'emscripten'
+cpu_family = 'x86'
+cpu = 'i686'
+endian = 'little'
