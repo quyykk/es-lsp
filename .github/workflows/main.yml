@@ -24,22 +24,23 @@ jobs:
         run: |
           cd build
           ninja test
-  build-clang:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install meson
-        run: pip install meson
-      - name: Install ninja
-        run: sudo apt install ninja-build
-      - name: Install libc++
-        run: sudo apt install libc++abi1 libc++1 libc++-dev
-      - name: Build
-        run: |
-          CXX=clang++-12 meson build
-          cd build
-          ninja
-      - name: Run tests
-        run: |
-          cd build
-          ninja test
+# TODO
+#  build-clang:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Install meson
+#        run: pip install meson
+#      - name: Install ninja
+#        run: sudo apt install ninja-build
+#      - name: Install libc++
+#        run: sudo apt install libc++abi1-12 libc++1-12 libc++-12-dev
+#      - name: Build
+#        run: |
+#          CXX=clang++-12 meson build
+#          cd build
+#          ninja
+#      - name: Run tests
+#        run: |
+#          cd build
+#          ninja test
