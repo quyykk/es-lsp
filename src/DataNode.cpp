@@ -258,6 +258,17 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     if (I < Text.size() && Text[I] == '#')
       while (I < Text.size() && Text[I] != '\n')
         ++I;
+
+    // It is recommended to use tabs for indentation at all times, so we provide
+    // a "hint" to the client.
+    if (LineIndentation != 2) {
+      auto &Diag = Result.Diagnostics.emplace_back();
+      Diag.Line = Line;
+      Diag.Column = 0;
+      Diag.EndColumn = Indent + 1;
+      Diag.Kind = Diagnostic::Hint;
+      Diag.Message = "tab is the recommended indentation character";
+    }
     // We finished parsing the line, on to the next one.
   }
 
