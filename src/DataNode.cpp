@@ -183,8 +183,9 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     if (!Indent && Node->Parameters.size() >= 2)
       // The last line of this entity is only known when we parsed the next
       // entity, so we need to update it later.
-      LastEntityLine =
-          &Result.Entities[Node->Parameters[0]].emplace_back(Node, 0).LastLine;
+      LastEntityLine = &Result.Entities[Node->Parameters[0]]
+                            .emplace_back(Entity{Node, 0})
+                            .LastLine;
 
     // Skip to the end of the line if this is a comment.
     if (I < Text.size() && Text[I] == '#')
