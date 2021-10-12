@@ -79,14 +79,71 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
   std::size_t *LastEntityLine = nullptr;
   std::size_t LastNonEmptyLine = -1;
 
+  // What kind of indentation this file uses.
+  // 0 - unknown
+  // 1 - space
+  // 2 - tabs
+  // 3 - other weird characters.
+  int FileIndentation = 0;
+
+  // Helper function to warn about mixed whitespace usage.
   // Parse file contents into a DataNode.
+  auto CheckIndent = [&FileIndentation, &Result](char Value, char Indent,
+                                                 int Type, int Line, int Column,
+                                                 int &LineIndentation,
+                                                 std::string_view Seen) {
+    // Special case for weird spaces that span multiple characters.
+    if (Value != Indent || Type == 3)
+      return;
+
+    if (!LineIndentation)
+      LineIndentation = Type;
+    if (!FileIndentation)
+      FileIndentation = Type;
+
+    if (Type != LineIndentation) {
+      // Mixed whitespace inside the current line.
+      auto &Diag = Result.Diagnostics.emplace_back();
+      Diag.Line = Line;
+      Diag.Column = Column;
+      Diag.EndColumn = Column + 1;
+      Diag.Kind = Diagnostic::Warning;
+      Diag.Message =
+          fmt::format("mixed indentation: {} character seen, expected {}", Seen,
+                      LineIndentation == 1   ? "space"
+                      : LineIndentation == 2 ? "tab"
+                                             : "weird space");
+    } else if (Type != FileIndentation) {
+      // Mixed whitespace inside the current file.
+      auto &Diag = Result.Diagnostics.emplace_back();
+      Diag.Line = Line;
+      Diag.Column = Column;
+      Diag.EndColumn = Column + 1;
+      Diag.Kind = Diagnostic::Warning;
+      Diag.Message =
+          fmt::format("mixed indentation: {} character seen, expected {}", Seen,
+                      FileIndentation == 1   ? "space"
+                      : FileIndentation == 2 ? "tab"
+                                             : "weird space");
+    }
+  };
+
   for (std::size_t I = 0; I < Text.size(); ++I) {
     ++Line;
     Column = 0;
 
+    // Same values as the file indentation kind.
+    int LineIndentation = 0;
+
     // Parse any indentation first.
     std::size_t Indent = 0;
     while (I < Text.size() && Text[I] <= ' ' && Text[I] != '\n') {
+      // Check for indentation inconsistencies.
+      CheckIndent(Text[I], ' ', 1, Line, Column, LineIndentation, "space");
+      CheckIndent(Text[I], '\t', 2, Line, Column, LineIndentation, "tab");
+      CheckIndent(Text[I], '\0', 3, Line, Column, LineIndentation,
+                  "weird space");
+
       ++Indent;
       ++I;
       ++Column;

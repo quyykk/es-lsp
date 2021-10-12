@@ -43,6 +43,7 @@ struct DataNode final {
 
 // Represents a diagnostic for a DataNode.
 struct Diagnostic {
+  Diagnostic() = default;
   Diagnostic(const DataNode &Node, std::size_t ParamIndex);
 
   // The line the diagnostic occurred. Multiline diagnostics are not a thing for
