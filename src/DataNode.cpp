@@ -163,7 +163,8 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
           auto &Diag = Result.Diagnostics.emplace_back(
               *Node, Node->Parameters.size() - 1);
           Diag.Kind = Diagnostic::Error;
-          Diag.Message = fmt::format("Missing '\\{}' end quote", Quote);
+          Diag.Message = fmt::format("Missing '{}{}' end quote",
+                                     Quote == '`' ? "" : "\\", Quote);
         }
         break;
       }
