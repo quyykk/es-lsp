@@ -132,6 +132,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
       Node->Parent = Previous.back();
     }
     Node->Line = Line;
+    Node->Indent = Indent;
 
     Previous.emplace_back(Node);
     Indents.emplace_back(Indent);

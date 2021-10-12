@@ -34,6 +34,8 @@ struct DataNode final {
   std::size_t Line;
   // Each column corresponds to the column location of a parameter.
   std::vector<std::size_t> Columns;
+  // The indent level of this datanode.
+  std::size_t Indent;
 
   // Converts the data node to string.
   std::string ToString() const;

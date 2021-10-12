@@ -545,15 +545,16 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       return SendError(InvalidRequest, "line too big", Id);
 
     std::string_view CurrentLine = FileIt->second.Content[Position->Line];
-    const auto Indent =
-        std::count(CurrentLine.begin(), CurrentLine.end(), '\t');
+    const auto Indent = std::count_if(CurrentLine.begin(), CurrentLine.end(),
+                                      [](char C) { return C <= ' '; });
 
-    // Calculate line of node with the same indentation.
+    // Calculate line of the parent node.
     std::size_t ParentLine = -1;
     for (auto I = Position->Line - 1; I >= 0; --I) {
       std::string_view Line = FileIt->second.Content[I];
-      const auto LineIndent = std::count(Line.begin(), Line.end(), '\t');
-      if (Indent - 1 == LineIndent) {
+      const auto LineIndent = std::count_if(Line.begin(), Line.end(),
+                                            [](char C) { return C <= ' '; });
+      if (LineIndent < Indent) {
         // We have the parent, but that's enough.
         ParentLine = I;
         break;
@@ -841,7 +842,7 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
       const auto &Node = NodeIt->second;
 
       // Since this line has a valid DataNode, we can color the first parameter.
-      const auto Indent = std::count(Line.begin(), Line.end(), '\t');
+      const auto Indent = Node.Indent;
 
       // A root node is marked as a 'class', else it's a 'property'.
       const bool IsRoot = !Indent;
