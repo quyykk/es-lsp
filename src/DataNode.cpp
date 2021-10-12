@@ -174,7 +174,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
       // We have the definition of a new entity, so if there was a last entity
       // definition we can now update its last line.
       if (LastEntityLine) {
-        *LastEntityLine = LastNonEmptyLine;
+        *LastEntityLine = LastNonEmptyLine - 1;
         LastEntityLine = nullptr;
       }
     } else {
@@ -264,7 +264,7 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
   // We have reached the end of the file. We now must update the last line of
   // the last entity definition.
   if (LastEntityLine)
-    *LastEntityLine = Line;
+    *LastEntityLine = Line - 1;
 
   return Result;
 }

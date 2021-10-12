@@ -1010,13 +1010,14 @@ void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
             {Node.Line, Node.Columns[Index] + Node.Parameters[Index].size()}),
         Entity.first,
         RangeToJson({DestNode.Line, DestNode.Columns.front()},
-                    {Entity.second->LastLine}),
+                    {Entity.second->LastLine,
+                     FileIt->second.Content[Entity.second->LastLine].size()}),
         RangeToJson({DestNode.Line, DestNode.Columns[Index]},
                     {DestNode.Line, DestNode.Columns[Index] +
                                         DestNode.Parameters[Index].size()}));
   }
   if (Array.empty())
-    return SendResult(Id, "null");
+    return SendResult(Id, "[]");
   Array.pop_back();
 
   SendResult(Id, fmt::format("[{}]", Array));
