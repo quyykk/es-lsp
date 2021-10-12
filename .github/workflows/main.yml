@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-gcc:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -15,21 +15,31 @@ jobs:
         run: pip install meson
       - name: Install ninja
         run: sudo apt install ninja-build
-      - name: Build (gcc)
+      - name: Build
         run: |
           CXX=g++-10 meson build
           cd build
           ninja
-      - name: Run tests (gcc)
+      - name: Run tests
         run: |
           cd build
           ninja test
-      - name: Build (clang)
+  build-clang:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install meson
+        run: pip install meson
+      - name: Install ninja
+        run: sudo apt install ninja-build
+      - name: Install libc++
+        run: sudo apt install libc++-12-dev
+      - name: Build
         run: |
-          CXX=clang++-12 meson clang
-          cd clang
+          CXX=clang++-12 meson build
+          cd build
           ninja
-      - name: Run tests (clang)
+      - name: Run tests
         run: |
-          cd clang
+          cd build
           ninja test
