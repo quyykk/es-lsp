@@ -50,3 +50,16 @@ effect rt
 
   REQUIRE(Root.Path == "some path");
 }
+
+TEST_CASE("SemanticTokens doesn't run over the end", "[whatgoeshere?]") {
+  std::string_view Text = R"(conversation "a"
+	scene "b"
+	`	a`
+)";
+
+  lsp::SemanticTokensFull("some path", Text);
+  // oops, this looks hard to test. I'll let you refactor.
+  // This case makes the client tell the server to shut down.
+  // I'm guessing the problem is something like sticking out over the edge of the document?
+  REQUIRE("this should fail" == "because the client doesn't like it");
+}
