@@ -127,6 +127,9 @@ private:
   // Returns the list of defined entities of the given type.
   std::vector<std::pair<std::string_view, const Entity *>>
   GetAllEntitiesNamed(std::string_view Name);
+  // Parses the given lines into semantic tokens.
+  std::string CalculateAndSendSemanticTokens(const File &File, unsigned StartLine,
+                                      unsigned EndLine);
 
 private:
   // Whether the server is initialized (i.e. received the 'initialize' request).

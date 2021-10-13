@@ -315,7 +315,7 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
           "completionProvider": {{}},
           "hoverProvider": {{}},
           "semanticTokensProvider": {{ "legend": {{ "tokenTypes": [{}], "tokenModifiers": [{}] }},
-              "full": true }},
+              "range": true, "full": true }},
           "declarationProvider": {{}},
           "definitionProvider": {{}},
           "implementationProvider": {{}}
@@ -805,129 +805,10 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
     return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
                      Id);
 
-  // Stores the list of completion tokens for the client. Every token has 5
-  // entries in this array (so for N tokens this array has size 5 * N).
-  //   - Line
-  //   - Start Column
-  //   - Length
-  //   - Token Type
-  //   - Token Modifier(s)
-  std::vector<int> Tokens;
-
-  // Conversative guess: Every line has a single token.
-  Tokens.reserve(FileIt->second.Content.size());
-
-  std::size_t LineIndex = -1;
-  auto MarkToken = [&Tokens, &LineIndex, PrevLine = std::size_t(),
-                    PrevStart = std::size_t()](
-                       std::size_t Start, std::size_t Length, TokenTypes Type,
-                       ModifierTypes Modifiers) mutable {
-    Tokens.reserve(Tokens.size() + 5);
-
-    // We need to perform a delta to the previous position.
-    Tokens.push_back(LineIndex > PrevLine ? LineIndex - PrevLine : 0);
-    Tokens.push_back(LineIndex == PrevLine ? Start - PrevStart : Start);
-
-    Tokens.push_back(Length);
-    Tokens.push_back((int)Type);
-    Tokens.push_back((int)Modifiers);
-
-    PrevStart = Start;
-    PrevLine = LineIndex;
-  };
-  const auto MarkAsComment = [&MarkToken](std::size_t Start, std::size_t End) {
-    MarkToken(Start, End - Start, TokenTypes::Comment, ModifierTypes::None);
-  };
-
-  // We go through every single line of the file and generate the required
-  // tokens.
-  for (const auto &Line : FileIt->second.Content) {
-    ++LineIndex;
-
-    auto First = Line.find_first_not_of(" \f\t\v\r\n");
-    if (First == std::string::npos)
-      // This line is completely empty.
-      continue;
-    if (Line[First] == '#') {
-      MarkAsComment(First, Line.size());
-      continue;
-    }
-
-    auto NodeIt = FileIt->second.CachedNodes.Nodes.find(LineIndex);
-    if (NodeIt != FileIt->second.CachedNodes.Nodes.end()) {
-      const auto &Node = NodeIt->second;
-
-      // Since this line has a valid DataNode, we can color the first parameter.
-      const auto Indent = Node.Indent;
-
-      // A root node is marked as a 'class', else it's a 'property'.
-      const bool IsRoot = !Indent;
-      bool IsQuoted = Node.Quoted.front();
-      MarkToken(Node.Columns.front() - IsQuoted,
-                Node.Parameters.front().size() + 2 * IsQuoted,
-                !IsRoot ? TokenTypes::Class : TokenTypes::Keyword,
-                ModifierTypes::None);
-
-      // Now we need to mark all of the parameters.
-      // TODO: We parse parameters here *again* (the first time they are parsed
-      // for type checking). It makes sense to store the parsed type so that we
-      // can reuse it here.
-      for (std::size_t I = 1; I < Node.Parameters.size(); ++I) {
-        auto ParamType = Type::FromString(Node.Parameters[I]);
-        auto Token = ParamType.Kind == Type::String ? TokenTypes::String
-                                                    : TokenTypes::Number;
-        auto Modifier = ModifierTypes::None;
-
-        if (IsRoot && I + 1 == Node.Parameters.size()) {
-          Token = TokenTypes::Variable;
-          Modifier = ModifierTypes::Definition;
-        }
-
-        bool IsQuoted = Node.Quoted[I];
-        MarkToken(Node.Columns[I] - IsQuoted,
-                  Node.Parameters[I].size() + 2 * IsQuoted, Token, Modifier);
-      }
-
-      // After all the parameters there might be a comment.
-      auto CommentStart =
-          Line.find('#', Node.Columns.back() + Node.Parameters.back().size());
-      if (CommentStart != std::string::npos)
-        MarkAsComment(CommentStart, Line.size());
-    }
-  }
-
-  if (Tokens.empty())
-    return SendResult(Id, "[]");
-
-  std::string Array;
-  // To avoid tons of (re)allocations, we guess the size.
-  // Some reasonable upper bounds:
-  //   - Line: 4 (files with more than 4 digits of lines are rare)
-  //   - Column: 2
-  //   - Length: 2
-  //   - Type + Modifier: 2
-  // => 10 per semantic token.
-  Array.resize((10 / 5) * Tokens.size() + Tokens.size());
-  char *It = Array.data();
-  char *End = Array.data() + Array.size();
-  for (auto T : Tokens) {
-    It = std::to_chars(It, End, T).ptr;
-    *It++ = ',';
-
-    // Check if there is enough space left.
-    if (End - It < 10) {
-      // Unfortunately this now requires an expensive reallocation.
-      // We double the size, which should be enough. In most cases, it is too
-      // much.
-      auto Index = It - Array.data();
-      Array.resize(Array.size() * 2);
-      It = Array.data() + Index;
-      End = Array.data() + Array.size();
-    }
-  }
-
-  std::string_view View(Array.data(), It - Array.data() - 1);
-  SendResult(Id, fmt::format(R"({{ "data": [{}] }})", View));
+  SendResult(
+      Id, fmt::format(R"({{ "data": [{}] }})",
+                      CalculateAndSendSemanticTokens(
+                          FileIt->second, 0, FileIt->second.Content.size())));
   Log(">> 'textDocument/semanticTokens/full' done!\n");
 }
 
@@ -935,7 +816,44 @@ void lsp::Server::SemanticTokensDelta(const json::Value &Id,
                                       const json::Value &Value) {}
 
 void lsp::Server::SemanticTokensRange(const json::Value &Id,
-                                      const json::Value &Value) {}
+                                      const json::Value &Value) {
+  Log(">> Processing 'textDocument/semanticTokens/full'.\n");
+  auto TextDocument = Value.FindMember("textDocument");
+  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
+    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
+  auto Path = GetString(TextDocument->value, "uri");
+  if (!Path)
+    return SendError(ParseError, "Error parsing 'uri' field", Id);
+
+  auto Range = Value.FindMember("range");
+  if (Range == Value.MemberEnd() || !Range->value.IsObject())
+    return SendError(ParseError, "Error parsing 'range' field", Id);
+  auto StartIt = Range->value.FindMember("start");
+  if (StartIt == Range->value.MemberEnd() || !StartIt->value.IsObject())
+    return SendError(ParseError, "Error parsing 'start' field", Id);
+  auto EndIt = Range->value.FindMember("end");
+  if (EndIt == Range->value.MemberEnd() || !EndIt->value.IsObject())
+    return SendError(ParseError, "Error parsing 'end' field", Id);
+  auto Start = ParseLocation(StartIt->value);
+  if (!Start)
+    return SendError(ParseError, "Error parsing 'start' location", Id);
+  auto End = ParseLocation(EndIt->value);
+  if (!End)
+    return SendError(ParseError, "Error parsing 'end' location", Id);
+
+  const auto FsPath = UriToFsPath(*Path);
+  auto FileIt = Files.find(FsPath);
+  if (FileIt == Files.end())
+    return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
+                     Id);
+
+
+  SendResult(
+      Id, fmt::format(R"({{ "data": [{}] }})",
+                      CalculateAndSendSemanticTokens(
+                          FileIt->second, Start->Line, End->Line)));
+  Log(">> 'textDocument/semanticTokens/full' done!\n");
+}
 
 void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
   Log(">> Processing 'textDocument/{{declaration,definition}}'.\n");
@@ -1101,4 +1019,133 @@ lsp::Server::GetAllEntitiesNamed(std::string_view Name) {
       Entities.emplace_back(File.second.Path, &Element);
   }
   return Entities;
+}
+
+std::string lsp::Server::CalculateAndSendSemanticTokens(const File &File,
+                                                        unsigned StartLine,
+                                                        unsigned EndLine) {
+
+  // Stores the list of completion tokens for the client. Every token has 5
+  // entries in this array (so for N tokens this array has size 5 * N).
+  //   - Line
+  //   - Start Column
+  //   - Length
+  //   - Token Type
+  //   - Token Modifier(s)
+  std::vector<int> Tokens;
+
+  // Conversative guess: Every line has a single token.
+  Tokens.reserve(EndLine - StartLine);
+
+  std::size_t I = StartLine;
+  auto MarkToken = [&Tokens, &I, PrevLine = std::size_t(),
+                    PrevStart = std::size_t()](
+                       std::size_t Start, std::size_t Length, TokenTypes Type,
+                       ModifierTypes Modifiers) mutable {
+    Tokens.reserve(Tokens.size() + 5);
+
+    // We need to perform a delta to the previous position.
+    Tokens.push_back(I > PrevLine ? I - PrevLine : 0);
+    Tokens.push_back(I == PrevLine ? Start - PrevStart : Start);
+
+    Tokens.push_back(Length);
+    Tokens.push_back((int)Type);
+    Tokens.push_back((int)Modifiers);
+
+    PrevStart = Start;
+    PrevLine = I;
+  };
+  const auto MarkAsComment = [&MarkToken](std::size_t Start, std::size_t End) {
+    MarkToken(Start, End - Start, TokenTypes::Comment, ModifierTypes::None);
+  };
+
+  // We go through every single line of the file and generate the required
+  // tokens.
+  for (; I < EndLine; ++I) {
+    const auto &Line = File.Content[I];
+
+    auto First = Line.find_first_not_of(" \f\t\v\r\n");
+    if (First == std::string::npos)
+      // This line is completely empty.
+      continue;
+    if (Line[First] == '#') {
+      MarkAsComment(First, Line.size());
+      continue;
+    }
+
+    auto NodeIt = File.CachedNodes.Nodes.find(I);
+    if (NodeIt != File.CachedNodes.Nodes.end()) {
+      const auto &Node = NodeIt->second;
+
+      // Since this line has a valid DataNode, we can color the first parameter.
+      const auto Indent = Node.Indent;
+
+      // A root node is marked as a 'class', else it's a 'property'.
+      const bool IsRoot = !Indent;
+      bool IsQuoted = Node.Quoted.front();
+      MarkToken(Node.Columns.front() - IsQuoted,
+                Node.Parameters.front().size() + 2 * IsQuoted,
+                !IsRoot ? TokenTypes::Class : TokenTypes::Keyword,
+                ModifierTypes::None);
+
+      // Now we need to mark all of the parameters.
+      // TODO: We parse parameters here *again* (the first time they are parsed
+      // for type checking). It makes sense to store the parsed type so that we
+      // can reuse it here.
+      for (std::size_t I = 1; I < Node.Parameters.size(); ++I) {
+        auto ParamType = Type::FromString(Node.Parameters[I]);
+        auto Token = ParamType.Kind == Type::String ? TokenTypes::String
+                                                    : TokenTypes::Number;
+        auto Modifier = ModifierTypes::None;
+
+        if (IsRoot && I + 1 == Node.Parameters.size()) {
+          Token = TokenTypes::Variable;
+          Modifier = ModifierTypes::Definition;
+        }
+
+        bool IsQuoted = Node.Quoted[I];
+        MarkToken(Node.Columns[I] - IsQuoted,
+                  Node.Parameters[I].size() + 2 * IsQuoted, Token, Modifier);
+      }
+
+      // After all the parameters there might be a comment.
+      auto CommentStart =
+          Line.find('#', Node.Columns.back() + Node.Parameters.back().size());
+      if (CommentStart != std::string::npos)
+        MarkAsComment(CommentStart, Line.size());
+    }
+  }
+
+  if (Tokens.empty())
+    return {};
+
+  std::string Array;
+  // To avoid tons of (re)allocations, we guess the size.
+  // Some reasonable upper bounds:
+  //   - Line: 4 (files with more than 4 digits of lines are rare)
+  //   - Column: 2
+  //   - Length: 2
+  //   - Type + Modifier: 2
+  // => 10 per semantic token.
+  Array.resize((10 / 5) * Tokens.size() + Tokens.size());
+  char *It = Array.data();
+  char *End = Array.data() + Array.size();
+  for (auto T : Tokens) {
+    It = std::to_chars(It, End, T).ptr;
+    *It++ = ',';
+
+    // Check if there is enough space left.
+    if (End - It < 10) {
+      // Unfortunately this now requires an expensive reallocation.
+      // We double the size, which should be enough. In most cases, it is too
+      // much.
+      auto Index = It - Array.data();
+      Array.resize(Array.size() * 2);
+      It = Array.data() + Index;
+      End = Array.data() + Array.size();
+    }
+  }
+
+  Array.resize(It - Array.data() - 1);
+  return Array;
 }
