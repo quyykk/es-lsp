@@ -15,7 +15,7 @@ c_args = []
 c_link_args = []
 cpp_args = ['-gsource-map']
 # it may help performance to remove some of these later
-cpp_link_args = ['-s', 'NODERAWFS=1', '-s', 'ALLOW_MEMORY_GROWTH=1', '-gsource-map', '-s', 'ASSERTIONS=2', '-s', 'SAFE_HEAP=1', '-s', 'STACK_OVERFLOW_CHECK=1']
+cpp_link_args = ['-s', 'NODERAWFS=1', '-s', 'ALLOW_MEMORY_GROWTH=1', '-gsource-map', '-s', 'SAFE_HEAP=1', '-s', 'STACK_OVERFLOW_CHECK=1']
 
 [host_machine]
 system = 'emscripten'

@@ -44,3 +44,27 @@ jobs:
 #        run: |
 #          cd build
 #          ninja test
+
+  build-emscripten:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: install emsdk
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          ./emsdk/emsdk install latest
+          ./emsdk/emsdk activate latest
+      - name: Install meson
+        run: pip install meson
+      - name: Install ninja
+        run: sudo apt install ninja-build
+      - name: Build
+        run: |
+          source emsdk/emsdk_env.sh
+          meson build --cross-file=emscripten.txt
+          cd build
+          ninja
+      - name: Run tests
+        run: |
+          cd build
+          ninja test
