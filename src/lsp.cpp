@@ -3,12 +3,14 @@
 #include "definitions.h"
 #include "fmt/core.h"
 #include "log.h"
+#include "sajson.h"
 #include "utils.h"
 
 #include <algorithm>
 #include <charconv>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -21,23 +23,17 @@ namespace impl {
 
 // Parses a value, either a string or an int from JSON. If it exists.
 template <typename T>
-std::optional<T> GetValue(const json::Value &Value, std::string_view Name) {
-  auto It = Value.FindMember(Name.data());
-  if (It == Value.MemberEnd())
-    return std::nullopt;
+std::optional<T> GetValue(const sajson::value &Value, std::string_view Name) {
+  auto It = Value.get_value_of_key(Name);
 
   if constexpr (std::is_same_v<T, int>) {
-    if (!It->value.IsInt())
+    if (It.get_type() != sajson::TYPE_INTEGER)
       return std::nullopt;
-    return It->value.GetInt();
+    return It.get_integer_value();
   } else if constexpr (std::is_same_v<T, std::string_view>) {
-    if (!It->value.IsString())
+    if (It.get_type() != sajson::TYPE_STRING)
       return std::nullopt;
-    return It->value.GetString();
-  } else if constexpr (std::is_same_v<T, unsigned>) {
-    if (!It->value.IsUint())
-      return std::nullopt;
-    return It->value.GetUint();
+    return It.as_view();
   }
 
   return std::nullopt;
@@ -45,22 +41,18 @@ std::optional<T> GetValue(const json::Value &Value, std::string_view Name) {
 
 } // namespace impl
 
-std::optional<std::string_view> GetString(const json::Value &Value,
+std::optional<std::string_view> GetString(const sajson::value &Value,
                                           std::string_view Name) {
   return impl::GetValue<std::string_view>(Value, Name);
 }
-std::optional<int> GetInt(const json::Value &Value, std::string_view Name) {
+std::optional<int> GetInt(const sajson::value &Value, std::string_view Name) {
   return impl::GetValue<int>(Value, Name);
-}
-std::optional<unsigned> GetUint(const json::Value &Value,
-                                std::string_view Name) {
-  return impl::GetValue<unsigned>(Value, Name);
 }
 
 // Parses a workspace json array.
-std::list<lsp::Workspace> ParseWorkspace(const json::Value &Value) {
+std::list<lsp::Workspace> ParseWorkspace(const sajson::value &Value) {
   std::list<lsp::Workspace> workspaces;
-  for (json::SizeType I = 0; I < Value.Size(); ++I) {
+  for (std::size_t I = 0; I < Value.get_length(); ++I) {
     auto Name = GetString(Value[I], "name");
     if (!Name)
       continue;
@@ -76,14 +68,14 @@ std::list<lsp::Workspace> ParseWorkspace(const json::Value &Value) {
 }
 
 // Parses a location.
-std::optional<lsp::Location> ParseLocation(const json::Value &Value) {
-  auto Line = GetUint(Value, "line");
+std::optional<lsp::Location> ParseLocation(const sajson::value &Value) {
+  auto Line = GetInt(Value, "line");
   if (!Line)
     return std::nullopt;
-  auto Column = GetUint(Value, "character");
+  auto Column = GetInt(Value, "character");
   if (!Column)
     return std::nullopt;
-  return lsp::Location{*Line, *Column};
+  return lsp::Location{(unsigned)*Line, (unsigned)*Column};
 }
 
 std::string RangeToJson(const lsp::Location &Start, const lsp::Location &End) {
@@ -103,46 +95,54 @@ constexpr int MethodNotFound = -32601;
 void lsp::Server::HandleNotification(std::string Message) {
   Log(">> Client sent:\n{}'\n", Message);
 
-  json::Document Doc;
-  if (Doc.Parse(Message.data()).HasParseError())
+  auto Doc = sajson::parse(
+      sajson::dynamic_allocation(),
+      sajson::mutable_string_view(Message.size(), Message.data()));
+  if (!Doc.is_valid())
     return SendError(ParseError, "Invalid JSON");
-  if (!Doc.IsObject())
+  const auto &Root = Doc.get_root();
+  if (Root.get_type() != sajson::TYPE_OBJECT)
     return SendError(ParseError, "JSON document not an object");
 
   // We expect a valid JSON-RPC object.
-  auto Version = GetString(Doc, "jsonrpc");
+  auto Version = GetString(Root, "jsonrpc");
   if (Version != "2.0")
     return SendError(InvalidRequest, "Unknown JSON RPC version");
 
-  auto Id = Doc.FindMember("id");
+  auto IdVal = Root.get_value_of_key("id"sv);
   // Requests without an "id" are in fact a notification.
 
-  auto Method = GetString(Doc, "method");
+  auto Method = GetString(Root, "method");
   if (!Method)
-    return SendError(ParseError, "Error parsing 'method' member", Id->value);
+    return SendError(ParseError, "Error parsing 'method' member", IdVal);
 
-  auto ParamsVal = Doc.FindMember("params");
+  auto ParamsVal = Root.get_value_of_key("params"sv);
   // "params" is optional.
 
   Log(">> Received method '{}'.\n", *Method);
 
   // Now that we have parsed the JSON RPC object, handle the given request.
   if (*Method == "initialize")
-    return Initialize(Id->value, ParamsVal->value);
-  if (*Method == "initialized")
-    // All good! Nothing to do here.
+    return Initialize(IdVal, ParamsVal);
+  if (*Method == "initialized") {
+    // All good! If we loaded workspaces, we can now begin to publish any
+    // diagnostics.
+    if (false && !Workspaces.empty())
+      for (const auto &File : Files)
+        UpdateDiagnosticsFor(File.first, File.second);
     return;
+  }
 
   // The "initialize" request needs to be called before all other requests.
   if (!Initialized)
-    return SendError(-32002, "Did not call 'initialize'", Id->value);
+    return SendError(-32002, "Did not call 'initialize'", IdVal);
   if (*Method == "shutdown") {
     Shutdown = true;
     Log(">> 'shutdown' done!\n");
     // Workaround for buggy clients (like the VScode one)
     // that don't send an 'exit' notification sometimes.
     State = ServerState::ExitSuccess;
-    return SendResult(Id->value, "null");
+    return SendResult(IdVal, "null");
   }
   if (*Method == "exit") {
     State = Shutdown ? ServerState::ExitSuccess : ServerState::ExitError;
@@ -150,30 +150,35 @@ void lsp::Server::HandleNotification(std::string Message) {
     return;
   }
   if (Shutdown)
-    return SendError(InvalidRequest, "Server is shutting down", Id->value);
+    return SendError(InvalidRequest, "Server is shutting down", IdVal);
+
+    // Execute the given function call in a separate thread.
+#define ASYNC(F)                                                               \
+  Pool.Push([this, IdVal, ParamsVal, Str = std::move(Message),                 \
+             D = std::move(Doc)] { return F; })
 
   // TODO: What are workspace symbols?
   // TODO: Implement file watch operations.
   if (*Method == "workspace/didChangeWorkspaceFolders")
-    return DidChangeWorkspaceFolders(Id->value, ParamsVal->value);
+    return ASYNC(DidChangeWorkspaceFolders(IdVal, ParamsVal));
   if (*Method == "workspace/didChangeConfiguration")
     // We don't have any configurations yet.
     return;
   if (*Method == "textDocument/didOpen")
-    return DidOpen(Id->value, ParamsVal->value);
+    return ASYNC(DidOpen(IdVal, ParamsVal));
   if (*Method == "textDocument/didChange")
-    return DidChange(Id->value, ParamsVal->value);
+    return ASYNC(DidChange(IdVal, ParamsVal));
   if (*Method == "textDocument/didClose")
-    return DidClose(Id->value, ParamsVal->value);
+    return ASYNC(DidClose(IdVal, ParamsVal));
   if (*Method == "textDocument/completion")
-    return Completion(Id->value, ParamsVal->value);
+    return ASYNC(Completion(IdVal, ParamsVal));
   if (*Method == "textDocument/hover")
-    return Hover(Id->value, ParamsVal->value);
+    return ASYNC(Hover(IdVal, ParamsVal));
   // TODO: 'textDocument/signatureHelp'
   if (*Method == "textDocument/declaration" ||
       *Method == "textDocument/definition" ||
       *Method == "textDocument/implementation")
-    return Goto(Id->value, ParamsVal->value);
+    return ASYNC(Goto(IdVal, ParamsVal));
   // TODO: 'textDocument/references'
   // TODO: 'textDocument/documentHighlight'
   // TODO: 'textDocument/documentSymbol'
@@ -182,18 +187,17 @@ void lsp::Server::HandleNotification(std::string Message) {
   // TODO: 'textDocument/rename'
   // TODO: 'textDocument/foldingRange'
   if (*Method == "textDocument/semanticTokens/full")
-    return SemanticTokensFull(Id->value, ParamsVal->value);
+    return ASYNC(SemanticTokensFull(IdVal, ParamsVal));
   if (*Method == "textDocument/semanticTokens/full/delta")
-    return SemanticTokensRange(Id->value, ParamsVal->value);
+    return ASYNC(SemanticTokensRange(IdVal, ParamsVal));
   if (*Method == "textDocument/semanticTokens/range")
-    return SemanticTokensRange(Id->value, ParamsVal->value);
-  // TODO: 'textDocument/linkedEditingRange'
+    return ASYNC(SemanticTokensRange(IdVal, ParamsVal));
+    // TODO: 'textDocument/linkedEditingRange'
+#undef ASYNC
 
   // Unknown method.
   LogError(">> Unknown method '{}'.\n", *Method);
-  if (Id != Doc.MemberEnd())
-    return SendError(MethodNotFound, "Method not found", Id->value);
-  return SendError(MethodNotFound, "Notification not found");
+  return SendError(MethodNotFound, "Method not found", IdVal);
 }
 
 void lsp::Server::LoadFromDirectory(std::string_view Path) {
@@ -216,12 +220,12 @@ void lsp::Server::LoadFromDirectory(std::string_view Path) {
 auto lsp::Server::GetState() const -> ServerState { return State; }
 
 void lsp::Server::SendError(int Error, std::string_view Message,
-                            const json::Value &Id) {
+                            const sajson::value &Id) {
   std::string IdStr;
-  if (Id.IsString())
-    IdStr = "\""s + Id.GetString() + "\"";
-  else if (Id.IsInt())
-    IdStr = fmt::format("{}", Id.GetInt());
+  if (Id.get_type() == sajson::TYPE_STRING)
+    IdStr = "\""s + Id.as_cstring() + "\"";
+  else if (Id.get_type() == sajson::TYPE_INTEGER)
+    IdStr = fmt::format("{}", Id.get_integer_value());
   else
     IdStr = "null";
 
@@ -237,12 +241,12 @@ void lsp::Server::SendError(int Error, std::string_view Message,
   std::cout.flush();
 }
 
-void lsp::Server::SendResult(const json::Value &Id, std::string_view Result) {
+void lsp::Server::SendResult(const sajson::value &Id, std::string_view Result) {
   std::string IdStr;
-  if (Id.IsString())
-    IdStr = "\""s + Id.GetString() + "\"";
+  if (Id.get_type() == sajson::TYPE_STRING)
+    IdStr = "\""s + Id.as_cstring() + "\"";
   else
-    IdStr = fmt::format("{}", Id.GetInt());
+    IdStr = fmt::format("{}", Id.get_integer_value());
 
   auto Message = fmt::format(R"(
 {{
@@ -274,15 +278,16 @@ void lsp::Server::SendNotification(std::string_view Method,
   std::cout.flush();
 }
 
-void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::Initialize(const sajson::value &Id,
+                             const sajson::value &Value) {
   Log(">> Processing 'initialize'.\n");
   if (Initialized)
     return SendError(InvalidRequest, "Server already initialized", Id);
 
   // Most fields here are not needed.
-  auto It = Value.FindMember("workspaceFolders");
-  if (It != Value.MemberEnd() && It->value.IsArray()) {
-    Workspaces = ParseWorkspace(It->value);
+  auto It = Value.get_value_of_key("workspaceFolders"sv);
+  if (It.get_type() == sajson::TYPE_ARRAY) {
+    Workspaces = ParseWorkspace(It);
     for (const auto &Workspace : Workspaces)
       LoadFromWorkspace(Workspace);
   }
@@ -326,34 +331,46 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
   Log(">> 'initialize' done!\n");
 }
 
-void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
-                                            const json::Value &Value) {
+bool lsp::Server::DidChangeWorkspaceFolders(const sajson::value &Id,
+                                            const sajson::value &Value) {
   Log(">> Processing 'workspace/didChangeWorkspaceFolders'.\n");
 
-  auto Event = Value.FindMember("event");
-  if (Event == Value.MemberEnd())
-    return SendError(ParseError, "Couldn't parse 'event' field", Id);
-  auto Added = Event->value.FindMember("added");
-  if (Added == Event->value.MemberEnd() || Added->value.IsArray())
-    return SendError(ParseError, "Error parsing 'added' field", Id);
-  auto Removed = Event->value.FindMember("removed");
-  if (Removed == Event->value.MemberEnd() || Removed->value.IsArray())
-    return SendError(ParseError, "Error parsing 'removed' field", Id);
+  auto Event = Value.get_value_of_key("event"sv);
+  if (Event.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Couldn't parse 'event' field", Id);
+    return true;
+  }
+  auto Added = Event.get_value_of_key("added"sv);
+  if (Added.get_type() != sajson::TYPE_ARRAY) {
+    SendError(ParseError, "Error parsing 'added' field", Id);
+    return true;
+  }
+  auto Removed = Event.get_value_of_key("removed"sv);
+  if (Removed.get_type() != sajson::TYPE_ARRAY) {
+    SendError(ParseError, "Error parsing 'removed' field", Id);
+    return true;
+  }
 
   // Now actually change definitions based on the workspace change.
-  for (json::SizeType I = 0; I < Removed->value.Size(); ++I) {
-    const auto &Remove = Removed[I].value;
-    if (!Remove.IsObject())
-      return SendError(ParseError, "Array element isn't an object", Id);
+  for (std::size_t I = 0; I < Removed.get_length(); ++I) {
+    const auto &Remove = Removed[I];
+    if (Remove.get_type() != sajson::TYPE_OBJECT) {
+      SendError(ParseError, "Array element isn't an object", Id);
+      return true;
+    }
     auto Path = GetString(Remove, "uri");
-    if (!Path)
-      return SendError(ParseError, "Error parsing 'uri' field", Id);
+    if (!Path) {
+      SendError(ParseError, "Error parsing 'uri' field", Id);
+      return true;
+    }
 
     auto WorkspaceIt = std::find_if(
         Workspaces.begin(), Workspaces.end(),
         [&Path](const auto &Workspace) { return Workspace.Path == *Path; });
-    if (WorkspaceIt == Workspaces.end())
-      return SendError(InvalidRequest, "Specified workspace doesn't exist", Id);
+    if (WorkspaceIt == Workspaces.end()) {
+      SendError(InvalidRequest, "Specified workspace doesn't exist", Id);
+      return true;
+    }
 
     // Remove every file that belongs to the workspace.
     for (auto It = Files.begin(); It != Files.end();)
@@ -363,16 +380,22 @@ void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
         ++It;
     Workspaces.erase(WorkspaceIt);
   }
-  for (json::SizeType I = 0; I < Added->value.Size(); ++I) {
-    const auto &Add = Added[I].value;
-    if (!Add.IsObject())
-      return SendError(ParseError, "Array element isn't an object", Id);
+  for (std::size_t I = 0; I < Added.get_length(); ++I) {
+    const auto &Add = Added[I];
+    if (Add.get_type() != sajson::TYPE_OBJECT) {
+      SendError(ParseError, "Array element isn't an object", Id);
+      return true;
+    }
     auto Path = GetString(Add, "uri");
-    if (!Path)
-      return SendError(ParseError, "Error parsing 'uri' field", Id);
+    if (!Path) {
+      SendError(ParseError, "Error parsing 'uri' field", Id);
+      return true;
+    }
     auto Name = GetString(Add, "name");
-    if (!Name)
-      return SendError(ParseError, "Error parsing 'name' field", Id);
+    if (!Name) {
+      SendError(ParseError, "Error parsing 'name' field", Id);
+      return true;
+    }
 
     Workspaces.emplace_back();
     Workspaces.back().Name = *Name;
@@ -380,35 +403,54 @@ void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
     LoadFromWorkspace(Workspaces.back());
   }
   Log(">> 'workspace/didChangeWorkspaceFolders' done!\n");
+  return true;
 }
 
-void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
+bool lsp::Server::DidOpen(const sajson::value &Id, const sajson::value &Value) {
   Log(">> Processing 'textDocument/didOpen'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto Version = GetInt(TextDocument->value, "version");
-  if (!Version)
-    return SendError(ParseError, "Error parsing 'version' field", Id);
-  auto Text = GetString(TextDocument->value, "text");
-  if (!Text)
-    return SendError(ParseError, "Error parsing 'text' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
+  auto Version = GetInt(TextDocument, "version");
+  if (!Version) {
+    SendError(ParseError, "Error parsing 'version' field", Id);
+    return true;
+  }
+  auto Text = GetString(TextDocument, "text");
+  if (!Text) {
+    SendError(ParseError, "Error parsing 'text' field", Id);
+    return true;
+  }
 
   auto FsPath = UriToFsPath(*Path);
+
+  std::shared_lock SharedLock(Mutex);
+  std::unique_lock Lock(Mutex, std::defer_lock);
   auto It = Files.find(FsPath);
-  if (It != Files.end())
+  if (It != Files.end()) {
     UpdateDiagnosticsFor(FsPath,
                          It->second); // The files is already loaded, normally
                                       // because it is part of a workspace.
-  else {
+    SharedLock.unlock();
+    Lock.lock();
+  } else {
+    SharedLock.unlock();
+    auto Nodes = LoadFromText(*Path, *Text);
+
+    Lock.lock();
+
     // If the file doesn't exist we load it.
     It = Files.emplace(FsPath, File()).first;
     It->second.Path = FsPath;
-    It->second.CachedNodes = LoadFromText(*Path, *Text);
+    It->second.CachedNodes = std::move(Nodes);
     UpdateDiagnosticsFor(*Path, It->second);
   }
   It->second.Content = TextToLines(*Text);
@@ -416,134 +458,184 @@ void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
   It->second.IsOpen = true;
 
   Log(">> 'textDocument/didOpen' done!\n");
+  return true;
 }
 
-void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
+bool lsp::Server::DidChange(const sajson::value &Id,
+                            const sajson::value &Value) {
   Log(">> Processing 'textDocument/didChange'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto Version = GetInt(TextDocument->value, "version");
-  if (!Version)
-    return SendError(ParseError, "Error parsing 'version' field", Id);
-  auto Changes = Value.FindMember("contentChanges");
-  if (Changes == Value.MemberEnd() || !Changes->value.IsArray())
-    return SendError(ParseError, "Error parsing 'contentChanges' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
+  auto Version = GetInt(TextDocument, "version");
+  if (!Version) {
+    SendError(ParseError, "Error parsing 'version' field", Id);
+    return true;
+  }
+  auto Changes = Value.get_value_of_key("contentChanges"sv);
+  if (Changes.get_type() != sajson::TYPE_ARRAY) {
+    SendError(ParseError, "Error parsing 'contentChanges' field", Id);
+    return true;
+  }
 
   auto FsPath = UriToFsPath(*Path);
+
+  std::shared_lock SharedLock(Mutex);
   auto It = Files.find(FsPath);
   if (It == Files.end())
-    return SendError(InvalidRequest, "didChange called on unloaded file", Id);
+    return false;
 
   auto &File = It->second;
   if (!File.IsOpen)
-    return SendError(InvalidRequest, "didChange called on unopened file", Id);
+    return false;
 
   // If the version is older than what the server has, don't do anything.
   if (File.Version > *Version)
-    return;
+    return true;
+  SharedLock.unlock();
 
-  for (json::SizeType I = 0; I < Changes->value.Size(); ++I) {
-    const auto &Change = Changes->value[I];
+  for (std::size_t I = 0; I < Changes.get_length(); ++I) {
+    const auto &Change = Changes[I];
     Location Start;
     Location End;
 
-    auto Range = Change.FindMember("range");
-    if (Range != Change.MemberEnd()) {
-      if (!Range->value.IsObject())
-        return SendError(ParseError, "Error parsing 'range' field", Id);
-      auto StartVal = Range->value.FindMember("start");
-      if (StartVal == Range->value.MemberEnd() || !StartVal->value.IsObject())
-        return SendError(ParseError, "Error parsing 'start' field", Id);
-      auto EndVal = Range->value.FindMember("end");
-      if (EndVal == Range->value.MemberEnd() || !EndVal->value.IsObject())
-        return SendError(ParseError, "Error parsing 'end' field", Id);
+    auto Range = Change.get_value_of_key("range"sv);
+    if (Range.get_type() != sajson::TYPE_NULL) {
+      if (Range.get_type() != sajson::TYPE_OBJECT) {
+        SendError(ParseError, "Error parsing 'range' field", Id);
+        return true;
+      }
+      auto StartVal = Range.get_value_of_key("start"sv);
+      if (StartVal.get_type() != sajson::TYPE_OBJECT) {
+        SendError(ParseError, "Error parsing 'start' field", Id);
+        return true;
+      }
+      auto EndVal = Range.get_value_of_key("end"sv);
+      if (EndVal.get_type() != sajson::TYPE_OBJECT) {
+        SendError(ParseError, "Error parsing 'end' field", Id);
+        return true;
+      }
 
-      if (auto StartPos = ParseLocation(StartVal->value))
+      if (auto StartPos = ParseLocation(StartVal))
         Start = *StartPos;
-      if (auto EndPos = ParseLocation(EndVal->value))
+      if (auto EndPos = ParseLocation(EndVal))
         End = *EndPos;
     }
 
     auto Text = GetString(Change, "text");
-    if (!Text)
-      return SendError(ParseError, "Error parsing 'text' field", Id);
+    if (!Text) {
+      SendError(ParseError, "Error parsing 'text' field", Id);
+      return true;
+    }
 
     // Now actually update our copy of the file and recalculate every
     // diagnostic.
-    File.Version = *Version;
+    std::vector<std::string> NewText;
     if (!Start && !End)
       // The whole file changed.
-      File.Content = TextToLines(*Text);
+      NewText = TextToLines(*Text);
     else {
       // FIXME: Only a subset changed. Find out where exactly the change
       // occurred.
       assert(!"not implemented! why is the client sending this?");
     }
-    File.CachedNodes = LoadFromText(*Path, *Text);
+
+    auto Nodes = LoadFromText(*Path, *Text);
+
+    {
+      std::lock_guard Guard(Mutex);
+      File.Version = *Version;
+      File.Content = std::move(NewText);
+      File.CachedNodes = std::move(Nodes);
+    }
+
+    SharedLock.lock();
     UpdateDiagnosticsFor(FsPath, File);
+    SharedLock.unlock();
   }
 
   Log(">> 'textDocument/didChange' done!\n");
+  return true;
 }
 
-void lsp::Server::DidClose(const json::Value &Id, const json::Value &Value) {
+bool lsp::Server::DidClose(const sajson::value &Id,
+                           const sajson::value &Value) {
   Log(">> Processing 'textDocument/didClose'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
 
   auto FsPath = UriToFsPath(*Path);
+  std::shared_lock SharedLock(Mutex);
   auto It = Files.find(FsPath);
-  if (It == Files.end())
-    return SendError(InvalidRequest, "can't close file that hasn't been loaded",
-                     Id);
-  if (!It->second.IsOpen)
-    return SendError(InvalidRequest, "can't close file that hasn't been opened",
-                     Id);
+  if (It == Files.end() || !It->second.IsOpen)
+    return false;
+  SharedLock.unlock();
+  std::lock_guard Guard(Mutex);
   It->second.IsOpen = false;
   It->second.Content.clear();
 
   Log(">> 'textDocument/didClose' done!\n");
+  return true;
 }
 
-void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
+bool lsp::Server::Completion(const sajson::value &Id,
+                             const sajson::value &Value) {
   Log(">> Processing 'textDocument/completion'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto PositionField = Value.FindMember("position");
-  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
-    return SendError(ParseError, "Error parsing 'position' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
+  auto PositionField = Value.get_value_of_key("position"sv);
+  if (PositionField.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'position' field", Id);
+    return true;
+  }
 
   auto FsPath = UriToFsPath(*Path);
-  auto Position = ParseLocation(PositionField->value);
-  if (!Position)
-    return SendError(ParseError, "Error parsing inner 'position' field", Id);
+  auto Position = ParseLocation(PositionField);
+  if (!Position) {
+    SendError(ParseError, "Error parsing inner 'position' field", Id);
+    return true;
+  }
 
+  std::shared_lock SharedLock(Mutex);
   // Now we need to figure out what the autocomplete list is.
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
-    return SendError(InvalidRequest, "completion wanted on unloaded file", Id);
+    return false;
 
   auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
   if (It == FileIt->second.CachedNodes.Nodes.end()) {
     // We are somewhere without a node definition so figure out on what indent
     // level the client is.
-    if (Position->Line >= FileIt->second.Content.size())
-      return SendError(InvalidRequest, "line too big", Id);
+    if (Position->Line >= FileIt->second.Content.size()) {
+      SendError(InvalidRequest, "line too big", Id);
+      return true;
+    }
 
     std::string_view CurrentLine = FileIt->second.Content[Position->Line];
     const auto Indent =
@@ -571,20 +663,27 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       Candidates.reserve(Definitions.size());
       for (const auto &Def : Definitions)
         Candidates.emplace_back(Def.first);
-    } else if (ParentLine == (std::size_t)-1)
-      return SendResult(Id, "[]");
-    else {
+    } else if (ParentLine == (std::size_t)-1) {
+      SendResult(Id, "[]");
+      return true;
+    } else {
       const auto &ChildrenIt =
           FileIt->second.CachedNodes.Nodes.find(ParentLine);
-      if (ChildrenIt == FileIt->second.CachedNodes.Nodes.end())
-        return SendResult(Id, "[]");
-      if (!ChildrenIt->second.Definition)
-        return SendResult(Id, "[]");
+      if (ChildrenIt == FileIt->second.CachedNodes.Nodes.end()) {
+        SendResult(Id, "[]");
+        return true;
+      }
+      if (!ChildrenIt->second.Definition) {
+        SendResult(Id, "[]");
+        return true;
+      }
 
       Candidates.reserve(ChildrenIt->second.Definition->Children.size());
       for (const auto &Child : ChildrenIt->second.Definition->Children)
         Candidates.emplace_back(Child.Name);
     }
+
+    SharedLock.unlock();
 
     // Now we build the list of candidates.
     // TODO: This code is duplicated.
@@ -611,7 +710,8 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
     }
     if (!Candidates.empty())
       Array.pop_back();
-    return SendResult(Id, fmt::format("[{}]", Array));
+    SendResult(Id, fmt::format("[{}]", Array));
+    return true;
   }
 
   const auto &Node = It->second;
@@ -629,8 +729,10 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
       break;
     }
   }
-  if (Index == (std::size_t)-1)
-    return SendResult(Id, "[]");
+  if (Index == (std::size_t)-1) {
+    SendResult(Id, "[]");
+    return true;
+  }
 
   std::vector<std::string_view> Candidates;
   if (!Index) {
@@ -647,12 +749,16 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
         Candidates.emplace_back(Def.first);
     }
   } else {
-    if (!Node.Definition)
+    if (!Node.Definition) {
       // Not much we can autocomplete if the node is invalid.
-      return SendResult(Id, "[]");
-    if (Index - 1 >= Node.Definition->ParameterTypes.size())
+      SendResult(Id, "[]");
+      return true;
+    }
+    if (Index - 1 >= Node.Definition->ParameterTypes.size()) {
       // Not much to do if there the argument is out of range.
-      return SendResult(Id, "[]");
+      SendResult(Id, "[]");
+      return true;
+    }
 
     // We inspect the type of the parameter to figure out what to autocomplete.
     // This is only relevant for keywords.
@@ -722,52 +828,70 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
 
   SendResult(Id, fmt::format(R"([{}])", Array));
   Log(">> 'textDocument/completion' done!\n");
+  return true;
 }
 
-void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
+bool lsp::Server::Hover(const sajson::value &Id, const sajson::value &Value) {
   Log(">> Processing 'textDocument/hover'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto PositionField = Value.FindMember("position");
-  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
-    return SendError(ParseError, "Error parsing 'position' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
+  auto PositionField = Value.get_value_of_key("position"sv);
+  if (PositionField.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'position' field", Id);
+    return true;
+  }
 
   auto FsPath = UriToFsPath(*Path);
-  auto Position = ParseLocation(PositionField->value);
-  if (!Position)
-    return SendError(ParseError, "Error parsing inner 'position' field", Id);
+  auto Position = ParseLocation(PositionField);
+  if (!Position) {
+    SendError(ParseError, "Error parsing inner 'position' field", Id);
+    return true;
+  }
 
+  std::shared_lock SharedLock(Mutex);
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
-    return SendError(InvalidRequest, "hover wanted on unloaded file", Id);
+    return false;
 
   auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
-  if (It == FileIt->second.CachedNodes.Nodes.end())
+  if (It == FileIt->second.CachedNodes.Nodes.end()) {
     // Nothing to hover.
-    return SendResult(Id, "null");
+    SendResult(Id, "null");
+    return true;
+  }
 
   const auto *Def = It->second.Definition;
-  if (!Def)
-    return SendResult(Id, "null");
+  if (!Def) {
+    SendResult(Id, "null");
+    return true;
+  }
 
   auto *ParentNode = It->second.Parent ? It->second.Parent : &It->second;
   while (ParentNode->Parent)
     ParentNode = ParentNode->Parent;
   // Now we just need to display the required docs to the client.
   auto TooltipIt = NodeTooltips.find(ParentNode->Parameters.front());
-  if (TooltipIt == NodeTooltips.end())
+  if (TooltipIt == NodeTooltips.end()) {
     // Something went wrong, invalid nodes should have been caught above.
-    return SendResult(Id, "null");
+    SendResult(Id, "null");
+    return true;
+  }
 
   auto Tooltip = TooltipIt->second.find(It->second.Parameters.front());
-  if (Tooltip == TooltipIt->second.end())
+  if (Tooltip == TooltipIt->second.end()) {
     // Something went wrong, the child of the root should exist at this point.
-    return SendResult(Id, "null");
+    SendResult(Id, "null");
+    return true;
+  }
 
   std::string Message =
       Tooltip->second.second.empty()
@@ -787,23 +911,28 @@ void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
                                    It->second.Columns.front() +
                                        It->second.Parameters.front().size()})));
   Log(">> 'textDocument/hover' done!\n");
+  return true;
 }
 
-void lsp::Server::SemanticTokensFull(const json::Value &Id,
-                                     const json::Value &Value) {
+bool lsp::Server::SemanticTokensFull(const sajson::value &Id,
+                                     const sajson::value &Value) {
   Log(">> Processing 'textDocument/semanticTokens/full'.\n");
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
 
   const auto FsPath = UriToFsPath(*Path);
+  std::shared_lock SharedLock(Mutex);
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
-    return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
-                     Id);
+    return false;
 
   // Stores the list of completion tokens for the client. Every token has 5
   // entries in this array (so for N tokens this array has size 5 * N).
@@ -895,9 +1024,12 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
         MarkAsComment(CommentStart, Line.size());
     }
   }
+  SharedLock.unlock();
 
-  if (Tokens.empty())
-    return SendResult(Id, "[]");
+  if (Tokens.empty()) {
+    SendResult(Id, "[]");
+    return true;
+  }
 
   std::string Array;
   // To avoid tons of (re)allocations, we guess the size.
@@ -929,39 +1061,55 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
   std::string_view View(Array.data(), It - Array.data() - 1);
   SendResult(Id, fmt::format(R"({{ "data": [{}] }})", View));
   Log(">> 'textDocument/semanticTokens/full' done!\n");
+  return true;
 }
 
-void lsp::Server::SemanticTokensDelta(const json::Value &Id,
-                                      const json::Value &Value) {}
+bool lsp::Server::SemanticTokensDelta(const sajson::value &Id,
+                                      const sajson::value &Value) {
+  return true;
+}
 
-void lsp::Server::SemanticTokensRange(const json::Value &Id,
-                                      const json::Value &Value) {}
+bool lsp::Server::SemanticTokensRange(const sajson::value &Id,
+                                      const sajson::value &Value) {
+  return true;
+}
 
-void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
+bool lsp::Server::Goto(const sajson::value &Id, const sajson::value &Value) {
   Log(">> Processing 'textDocument/{{declaration,definition}}'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto PositionField = Value.FindMember("position");
-  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
-    return SendError(ParseError, "Error parsing 'position' field", Id);
+  auto TextDocument = Value.get_value_of_key("textDocument"sv);
+  if (TextDocument.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'textDocument' field", Id);
+    return true;
+  }
+  auto Path = GetString(TextDocument, "uri");
+  if (!Path) {
+    SendError(ParseError, "Error parsing 'uri' field", Id);
+    return true;
+  }
+  auto PositionField = Value.get_value_of_key("position"sv);
+  if (PositionField.get_type() != sajson::TYPE_OBJECT) {
+    SendError(ParseError, "Error parsing 'position' field", Id);
+    return true;
+  }
 
   auto FsPath = UriToFsPath(*Path);
-  auto Position = ParseLocation(PositionField->value);
-  if (!Position)
-    return SendError(ParseError, "Error parsing inner 'position' field", Id);
+  auto Position = ParseLocation(PositionField);
+  if (!Position) {
+    SendError(ParseError, "Error parsing inner 'position' field", Id);
+    return true;
+  }
 
+  std::shared_lock SharedLock(Mutex);
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
-    return SendError(InvalidRequest, "goto wanted on unloaded file", Id);
+    return false;
 
   auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
-  if (It == FileIt->second.CachedNodes.Nodes.end())
-    return SendResult(Id, "null");
+  if (It == FileIt->second.CachedNodes.Nodes.end()) {
+    SendResult(Id, "null");
+    return true;
+  }
   const auto &Node = It->second;
 
   // Figure out what parameter we are autocompleting.
@@ -978,19 +1126,25 @@ void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
       break;
     }
   }
-  if (Index == (std::size_t)-1)
-    return SendResult(Id, "null");
+  if (Index == (std::size_t)-1) {
+    SendResult(Id, "null");
+    return true;
+  }
 
-  if (!Node.Definition || !Index)
+  if (!Node.Definition || !Index) {
     // If the node is invalid or it is the root (roots don't have a type), then
     // there is nothing to do.
-    return SendResult(Id, "null");
+    SendResult(Id, "null");
+    return true;
+  }
 
   auto Annotation = Node.Definition->ParameterTypes[Index - 1].Annotation;
   // Now that we have an index we can inspect it. Goto on anything but entities
   // doesn't make any sense.
-  if (Annotation.empty())
-    return SendResult(Id, "null");
+  if (Annotation.empty()) {
+    SendResult(Id, "null");
+    return true;
+  }
 
   // Now that we have an entity with an annotation, we can send all of its
   // definitions to the client.
@@ -1022,12 +1176,15 @@ void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
                     {DestNode.Line, DestNode.Columns[Index] +
                                         DestNode.Parameters[Index].size()}));
   }
-  if (Array.empty())
-    return SendResult(Id, "[]");
+  if (Array.empty()) {
+    SendResult(Id, "[]");
+    return true;
+  }
   Array.pop_back();
 
   SendResult(Id, fmt::format("[{}]", Array));
   Log(">> 'textDocument/{{declaration,definition}}' done!\n");
+  return true;
 }
 
 void lsp::Server::UpdateDiagnosticsFor(std::string_view Uri, const File &File) {
@@ -1072,22 +1229,30 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
   auto DataFiles = FindESData(Workspace.Path);
 
   for (const auto &Path : DataFiles) {
-    auto It = Files.find(Path);
-    if (It != Files.end()) {
-      // The file is already loaded, but we still need to update its
-      // workspace.
-      It->second.Parent = &Workspace;
-      continue;
+    {
+      std::shared_lock SharedLock(Mutex);
+      auto It = Files.find(Path);
+      if (It != Files.end()) {
+        SharedLock.unlock();
+        // The file is already loaded, but we still need to update its
+        // workspace.
+        {
+          std::lock_guard Guard(Mutex);
+          It->second.Parent = &Workspace;
+        }
+        continue;
+      }
     }
 
-    auto &File = Files[Path];
-    File.Path = Path;
-    File.Parent = &Workspace;
-    File.CachedNodes = LoadFromFile(Path);
-
-    // Workspace files are always error checked.
-    if (Initialized)
-      UpdateDiagnosticsFor(Workspace.Path, File);
+    // We need write access here.
+    auto Nodes = LoadFromFile(Path);
+    {
+      std::lock_guard Guard(Mutex);
+      auto &File = Files[Path];
+      File.Path = Path;
+      File.Parent = &Workspace;
+      File.CachedNodes = std::move(Nodes);
+    }
   }
 }
 
@@ -1100,5 +1265,6 @@ lsp::Server::GetAllEntitiesNamed(std::string_view Name) {
     for (const auto &Element : ToAdd)
       Entities.emplace_back(File.second.Path, &Element);
   }
+
   return Entities;
 }

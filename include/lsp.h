@@ -2,15 +2,15 @@
 #define LSP_H
 
 #include "DataNode.h"
+#include "threadpool.h"
 
 #include <list>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "rapidjson/document.h"
-
-namespace json = rapidjson;
+#include "sajson.h"
 
 namespace lsp {
 
@@ -91,6 +91,10 @@ enum class ModifierTypes {
 // The actual LSP server. It is reponsible for talking to the client.
 class Server final {
 public:
+  Server() noexcept = default;
+  Server(const Server &) noexcept = delete;
+  Server &operator=(const Server &) noexcept = delete;
+
   // Parses and executes the given message from the client.
   void HandleNotification(std::string Message);
   // Loads a whole directory of data files from the given path.
@@ -102,23 +106,23 @@ public:
 private:
   // Functions used to talk to the client.
   void SendError(int Error, std::string_view Message,
-                 const json::Value &Id = json::Value());
-  void SendResult(const json::Value &Id, std::string_view Result);
+                 const sajson::value &Id = sajson::value());
+  void SendResult(const sajson::value &Id, std::string_view Result);
   void SendNotification(std::string_view Method, std::string_view Params);
 
   // Callbacks called when the client send the appropriate request/notification.
-  void Initialize(const json::Value &Id, const json::Value &Value);
-  void DidChangeWorkspaceFolders(const json::Value &Id,
-                                 const json::Value &Value);
-  void DidOpen(const json::Value &Id, const json::Value &Value);
-  void DidChange(const json::Value &Id, const json::Value &Value);
-  void DidClose(const json::Value &Id, const json::Value &Value);
-  void Completion(const json::Value &Id, const json::Value &Value);
-  void Hover(const json::Value &Id, const json::Value &Value);
-  void SemanticTokensFull(const json::Value &Id, const json::Value &Value);
-  void SemanticTokensDelta(const json::Value &Id, const json::Value &Value);
-  void SemanticTokensRange(const json::Value &Id, const json::Value &Value);
-  void Goto(const json::Value &Id, const json::Value &Value);
+  void Initialize(const sajson::value &Id, const sajson::value &Value);
+  bool DidChangeWorkspaceFolders(const sajson::value &Id,
+                                 const sajson::value &Value);
+  bool DidOpen(const sajson::value &Id, const sajson::value &Value);
+  bool DidChange(const sajson::value &Id, const sajson::value &Value);
+  bool DidClose(const sajson::value &Id, const sajson::value &Value);
+  bool Completion(const sajson::value &Id, const sajson::value &Value);
+  bool Hover(const sajson::value &Id, const sajson::value &Value);
+  bool SemanticTokensFull(const sajson::value &Id, const sajson::value &Value);
+  bool SemanticTokensDelta(const sajson::value &Id, const sajson::value &Value);
+  bool SemanticTokensRange(const sajson::value &Id, const sajson::value &Value);
+  bool Goto(const sajson::value &Id, const sajson::value &Value);
 
   // Sends diagnostics for the given file to the client.
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
@@ -141,6 +145,10 @@ private:
 
   // Every file loaded. This includes files not opened in the client.
   std::unordered_map<std::string, File> Files;
+  // A mutex responsible for synchronizing read/writes to the cached files.
+  std::shared_mutex Mutex;
+  // The thread pool used to execute tasks.
+  ThreadPool Pool;
 };
 
 } // namespace lsp
