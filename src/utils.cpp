@@ -1,4 +1,6 @@
 #include "utils.h"
+
+#include <fstream>
 #include <filesystem>
 
 std::string lsp::UriToFsPath(std::string_view Uri) {
@@ -18,6 +20,17 @@ std::vector<std::string> lsp::TextToLines(std::string_view Text) {
   } while (NewLine != std::string::npos);
 
   return Result;
+}
+
+std::vector<std::string> lsp::FileToLines(const fs::path &Path) {
+  std::ifstream File(Path, std::ios::binary | std::ios::ate);
+  std::size_t Size = File.tellg();
+  File.seekg(0, std::ios::beg);
+
+  std::string Contents(Size, '\0');
+  if (!File.read(Contents.data(), Size))
+    return {};
+  return TextToLines(Contents);
 }
 
 std::size_t lsp::CountLineIndentation(std::string_view Line,

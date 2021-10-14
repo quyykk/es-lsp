@@ -54,18 +54,7 @@ std::string lsp::RootDataNode::ToString() const {
   return Str;
 }
 
-auto lsp::LoadFromFile(const fs::path &Path) -> RootDataNode {
-  std::ifstream File(Path, std::ios::binary | std::ios::ate);
-  std::size_t Size = File.tellg();
-  File.seekg(0, std::ios::beg);
-
-  std::string Contents(Size, '\0');
-  if (!File.read(Contents.data(), Size))
-    return {};
-  return LoadFromText(Path.string().c_str(), Contents);
-}
-
-auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
+auto lsp::LoadFromLines(std::string_view Path, std::span<std::string> Lines)
     -> RootDataNode {
   RootDataNode Result;
   Result.Path = Path;
@@ -128,148 +117,148 @@ auto lsp::LoadFromText(std::string_view Path, std::string_view Text)
     }
   };
 
-  for (std::size_t I = 0; I < Text.size(); ++I) {
+  for (std::string_view Text : Lines) {
     ++Line;
-    Column = 0;
+    for (std::size_t I = 0; I < Text.size(); ++I) {
+      Column = 0;
 
-    // Same values as the file indentation kind.
-    int LineIndentation = 0;
+      // Same values as the file indentation kind.
+      int LineIndentation = 0;
 
-    // Parse any indentation first.
-    std::size_t Indent = 0;
-    while (I < Text.size() && Text[I] <= ' ' && Text[I] != '\n') {
-      // Check for indentation inconsistencies.
-      CheckIndent(Text[I], ' ', 1, Line, Column, LineIndentation, "space");
-      CheckIndent(Text[I], '\t', 2, Line, Column, LineIndentation, "tab");
-      CheckIndent(Text[I], '\0', 3, Line, Column, LineIndentation,
-                  "weird space");
+      // Parse any indentation first.
+      std::size_t Indent = 0;
+      while (I < Text.size() && Text[I] <= ' ') {
+        // Check for indentation inconsistencies.
+        CheckIndent(Text[I], ' ', 1, Line, Column, LineIndentation, "space");
+        CheckIndent(Text[I], '\t', 2, Line, Column, LineIndentation, "tab");
+        CheckIndent(Text[I], '\0', 3, Line, Column, LineIndentation,
+                    "weird space");
 
-      ++Indent;
-      ++I;
-      ++Column;
-    }
-
-    // Check if this is an empty line.
-    if (I == Text.size())
-      break;
-    if (Text[I] == '#')
-      while (I < Text.size() && Text[I] != '\n')
-        ++I;
-    if (I == Text.size())
-      break;
-    if (Text[I] == '\n')
-      continue;
-
-    LastNonEmptyLine = Line;
-
-    // If this line has no indentation, then it is a root node.
-    // If it does, we need to check which node is its parent.
-    DataNode *Node;
-    if (!Indent) {
-      Previous.clear();
-      Indents.clear();
-      Node = &Result.Nodes[Line];
-      Node->Parent = nullptr;
-
-      // We have the definition of a new entity, so if there was a last entity
-      // definition we can now update its last line.
-      if (LastEntityLine) {
-        *LastEntityLine = LastNonEmptyLine - 1;
-        LastEntityLine = nullptr;
-      }
-    } else {
-      // Choose the correct parent node.
-      while (Indents.back() >= Indent) {
-        Indents.pop_back();
-        Previous.pop_back();
-        assert(!Indents.empty() && "weird indentation?");
-      }
-      Node = &Result.Nodes[Line];
-      Previous.back()->Children.emplace_back(Node);
-      Node->Parent = Previous.back();
-    }
-    Node->Line = Line;
-    Node->Indent = Indent;
-
-    Previous.emplace_back(Node);
-    Indents.emplace_back(Indent);
-
-    // Now we read any parameters.
-    while (Text[I] != '\n' && Text[I] != '#') {
-      // Parameters may be be quoted.
-      bool Quoted = false;
-      char Quote;
-      if (Text[I] == '"' || Text[I] == '`') {
-        Quoted = true;
-        Quote = Text[I];
+        ++Indent;
         ++I;
         ++Column;
       }
 
-      auto &Param = Node->Parameters.emplace_back();
-      Node->Columns.emplace_back(Column);
-      Node->Quoted.emplace_back(Quoted);
-      while (I < Text.size() && Text[I] != '\n' &&
-             (Quoted ? Text[I] != Quote : Text[I] > ' ')) {
-        Param += Text[I++];
-        ++Column;
-      }
-
-      if (Text[I] == '\n' || I == Text.size()) {
-        if (Quoted) {
-          // If this parameter is quoted then there's a missing quotation mark.
-          auto &Diag = Result.Diagnostics.emplace_back(
-              *Node, Node->Parameters.size() - 1);
-          Diag.Kind = Diagnostic::Error;
-          Diag.Message = fmt::format("Missing '{}{}' end quote",
-                                     Quote == '`' ? "" : "\\", Quote);
-        }
-        break;
-      }
-
-      // Eat last quote.
-      if (Quoted) {
-        ++I;
-        ++Column;
-      }
-
-      // Eat any whitespace.
-      while (I < Text.size() && Text[I] != '\n' && Text[I] <= ' ') {
-        ++I;
-        ++Column;
-      }
-
+      // Check if this is an empty line.
+      if (I < Text.size() && Text[I] == '#')
+        while (I < Text.size())
+          ++I;
       if (I == Text.size())
         break;
+
+      LastNonEmptyLine = Line;
+
+      // If this line has no indentation, then it is a root node.
+      // If it does, we need to check which node is its parent.
+      DataNode *Node;
+      if (!Indent) {
+        Previous.clear();
+        Indents.clear();
+        Node = &Result.Nodes[Line];
+        Node->Parent = nullptr;
+
+        // We have the definition of a new entity, so if there was a last entity
+        // definition we can now update its last line.
+        if (LastEntityLine) {
+          *LastEntityLine = LastNonEmptyLine - 1;
+          LastEntityLine = nullptr;
+        }
+      } else {
+        // Choose the correct parent node.
+        while (Indents.back() >= Indent) {
+          Indents.pop_back();
+          Previous.pop_back();
+          assert(!Indents.empty() && "weird indentation?");
+        }
+        Node = &Result.Nodes[Line];
+        Previous.back()->Children.emplace_back(Node);
+        Node->Parent = Previous.back();
+      }
+      Node->Line = Line;
+      Node->Indent = Indent;
+
+      Previous.emplace_back(Node);
+      Indents.emplace_back(Indent);
+
+      // Now we read any parameters.
+      while (Text[I] != '#') {
+        // Parameters may be be quoted.
+        bool Quoted = false;
+        char Quote;
+        if (Text[I] == '"' || Text[I] == '`') {
+          Quoted = true;
+          Quote = Text[I];
+          ++I;
+          ++Column;
+        }
+
+        auto &Param = Node->Parameters.emplace_back();
+        Node->Columns.emplace_back(Column);
+        Node->Quoted.emplace_back(Quoted);
+        while (I < Text.size() &&
+               (Quoted ? Text[I] != Quote : Text[I] > ' ')) {
+          Param += Text[I++];
+          ++Column;
+        }
+
+        if (I == Text.size()) {
+          if (Quoted) {
+            // If this parameter is quoted then there's a missing quotation
+            // mark.
+            auto &Diag = Result.Diagnostics.emplace_back(
+                *Node, Node->Parameters.size() - 1);
+            Diag.Kind = Diagnostic::Error;
+            Diag.Message = fmt::format("Missing '{}{}' end quote",
+                                       Quote == '`' ? "" : "\\", Quote);
+          }
+          break;
+        }
+
+        // Eat last quote.
+        if (Quoted) {
+          ++I;
+          ++Column;
+        }
+
+        // Eat any whitespace.
+        while (I < Text.size() && Text[I] <= ' ') {
+          ++I;
+          ++Column;
+        }
+
+        if (I == Text.size())
+          break;
+      }
+
+      assert(!Node->Parameters.empty() &&
+             "empty lines should have been skipped before");
+
+      CheckLine(Result.Diagnostics, Previous);
+      if (!Indent && Node->Parameters.size() >= 2)
+        // The last line of this entity is only known when we parsed the next
+        // entity, so we need to update it later.
+        LastEntityLine = &Result.Entities[Node->Parameters[0]]
+                              .emplace_back(Entity{Node, 0})
+                              .LastLine;
+
+      // Skip to the end of the line if this is a comment.
+      if (I < Text.size() && Text[I] == '#')
+        while (I < Text.size())
+          ++I;
+
+      // It is recommended to use tabs for indentation at all times, so we
+      // provide a "hint" to the client.
+      if (Indent && LineIndentation != 2) {
+        auto &Diag = Result.Diagnostics.emplace_back();
+        Diag.Line = Line;
+        Diag.Column = 0;
+        Diag.EndColumn = Indent + 1;
+        Diag.Kind = Diagnostic::Hint;
+        Diag.Message = "tab is the recommended indentation character";
+      }
+
+      // We finished parsing the line, on to the next one.
     }
-
-    assert(!Node->Parameters.empty() &&
-           "empty lines should have been skipped before");
-
-    CheckLine(Result.Diagnostics, Previous);
-    if (!Indent && Node->Parameters.size() >= 2)
-      // The last line of this entity is only known when we parsed the next
-      // entity, so we need to update it later.
-      LastEntityLine = &Result.Entities[Node->Parameters[0]]
-                            .emplace_back(Entity{Node, 0})
-                            .LastLine;
-
-    // Skip to the end of the line if this is a comment.
-    if (I < Text.size() && Text[I] == '#')
-      while (I < Text.size() && Text[I] != '\n')
-        ++I;
-
-    // It is recommended to use tabs for indentation at all times, so we provide
-    // a "hint" to the client.
-    if (Indent && LineIndentation != 2) {
-      auto &Diag = Result.Diagnostics.emplace_back();
-      Diag.Line = Line;
-      Diag.Column = 0;
-      Diag.EndColumn = Indent + 1;
-      Diag.Kind = Diagnostic::Hint;
-      Diag.Message = "tab is the recommended indentation character";
-    }
-    // We finished parsing the line, on to the next one.
   }
 
   // We have reached the end of the file. We now must update the last line of

@@ -1,13 +1,11 @@
 #ifndef DATANODE_H
 #define DATANODE_H
 
-#include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
-namespace fs = std::filesystem;
 
 namespace lsp {
 
@@ -83,10 +81,8 @@ struct RootDataNode final {
   std::string ToString() const;
 };
 
-// Loads and parses the file from disk.
-RootDataNode LoadFromFile(const fs::path &Path);
-// Loads and parses the given file but its contents are given.
-RootDataNode LoadFromText(std::string_view Path, std::string_view Text);
+// Loads and parses the given file but its contents are given line by line.
+RootDataNode LoadFromLines(std::string_view Path, std::span<std::string> Text);
 
 } // namespace lsp
 

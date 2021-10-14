@@ -56,7 +56,7 @@ struct Location {
   std::size_t Line = 0;
   std::size_t Column = 0;
 
-  constexpr operator bool() const noexcept { return Line || Column; }
+  constexpr explicit operator bool() const noexcept { return Line || Column; }
 };
 
 // The semantic tokens + any modifiers. Used for coloring by the client.
@@ -128,8 +128,9 @@ private:
   std::vector<std::pair<std::string_view, const Entity *>>
   GetAllEntitiesNamed(std::string_view Name);
   // Parses the given lines into semantic tokens.
-  std::string CalculateAndSendSemanticTokens(const File &File, unsigned StartLine,
-                                      unsigned EndLine);
+  std::string CalculateAndSendSemanticTokens(const File &File,
+                                             unsigned StartLine,
+                                             unsigned EndLine);
 
 private:
   // Whether the server is initialized (i.e. received the 'initialize' request).

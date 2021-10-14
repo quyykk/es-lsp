@@ -6,7 +6,7 @@
 #include "lsp.h"
 
 TEST_CASE("DataNodes are parsed and checked correctly", "[datanodes]") {
-  std::string_view Text = R"(# jdlkajf
+  /*std::string_view Text = R"(# jdlkajf
    # Tyaya # fjfjjf###
         ####
 
@@ -48,5 +48,5 @@ effect rt
   // REQUIRE(Root.Entities.at("effect")[0] == "FFFF");
   // REQUIRE(Root.Entities.at("effect")[1] == "rt");
 
-  REQUIRE(Root.Path == "some path");
+  REQUIRE(Root.Path == "some path"); */
 }

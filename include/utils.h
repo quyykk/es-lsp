@@ -17,6 +17,7 @@ std::string UriToFsPath(std::string_view Uri);
 // Converts the given text to a vector that contains each line (without any
 // newline).
 std::vector<std::string> TextToLines(std::string_view Text);
+std::vector<std::string> FileToLines(const fs::path &Path);
 
 // Counts the indentation of the passed line.
 std::size_t CountLineIndentation(std::string_view Line,

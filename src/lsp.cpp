@@ -1,5 +1,6 @@
 #include "lsp.h"
 
+#include "DataNode.h"
 #include "definitions.h"
 #include "fmt/core.h"
 #include "log.h"
@@ -209,7 +210,8 @@ void lsp::Server::LoadFromDirectory(std::string_view Path) {
 
     auto &File = Files[Path];
     File.Path = Path;
-    File.CachedNodes = LoadFromFile(Path);
+    File.Content = FileToLines(Path);
+    File.CachedNodes = LoadFromLines(Path, File.Content);
   }
 }
 
@@ -310,7 +312,7 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
 {{
     "capabilities":
     {{
-          "textDocumentSync": {{ "openClose": true, "change": 1 }},
+          "textDocumentSync": {{ "openClose": true, "change": 2 }},
           "workspace": {{ "workspaceFolders": {{ "supported": true, "changeNotifications": true }} }},
           "completionProvider": {{}},
           "hoverProvider": {{}},
@@ -408,10 +410,10 @@ void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
     // If the file doesn't exist we load it.
     It = Files.emplace(FsPath, File()).first;
     It->second.Path = FsPath;
-    It->second.CachedNodes = LoadFromText(*Path, *Text);
+    It->second.Content = TextToLines(*Text);
+    It->second.CachedNodes = LoadFromLines(*Path, It->second.Content);
     UpdateDiagnosticsFor(*Path, It->second);
   }
-  It->second.Content = TextToLines(*Text);
   It->second.Version = *Version;
   It->second.IsOpen = true;
 
@@ -476,18 +478,64 @@ void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
     // Now actually update our copy of the file and recalculate every
     // diagnostic.
     File.Version = *Version;
-    if (!Start && !End)
+    if (!Start && !End) {
       // The whole file changed.
       File.Content = TextToLines(*Text);
-    else {
-      // FIXME: Only a subset changed. Find out where exactly the change
-      // occurred.
-      assert(!"not implemented! why is the client sending this?");
+      continue;
     }
-    File.CachedNodes = LoadFromText(*Path, *Text);
-    UpdateDiagnosticsFor(FsPath, File);
+
+    // Only a subset changed. Find out where exactly the change occurred.
+    // We're manipulation lines, so we need to detect any newlines in the
+    // new text and insert the new lines in the content array.
+    auto NewLines = TextToLines(*Text);
+    // If we're modifying more lines than the range specifies, then this means
+    // that we have new lines!
+
+    if (Start.Line == End.Line && NewLines.size() == 1) {
+      File.Content[Start.Line].erase(Start.Column, End.Column - Start.Column);
+      File.Content[Start.Line].insert(Start.Column, NewLines.front());
+      continue;
+    }
+
+    // The first and last lines are special: They can be modified in place.
+    std::string StartSave = File.Content[Start.Line].substr(Start.Column);
+    File.Content[Start.Line].erase(Start.Column);
+    File.Content[Start.Line].insert(Start.Column, NewLines.front());
+
+    const auto LinesChanged = End.Line - Start.Line;
+    const auto EndIndex = std::min(LinesChanged, NewLines.size() - 1);
+    std::size_t LastReplaced = 0;
+    for (unsigned I = 1; I < EndIndex; ++I) {
+      File.Content[Start.Line + I] = std::move(NewLines[I]);
+      LastReplaced = I;
+    }
+
+    // Now either insert of delete lines. If we're deleting we might need to
+    // include the start or end line.
+    const auto LinesToInsert = NewLines.size() - 1;
+    if (LinesToInsert == LinesChanged) {
+      // We simply need to replace the last line.
+      File.Content[End.Line].erase(0, End.Column);
+      File.Content[End.Line].insert(0, NewLines.back());
+    } else if (LinesToInsert < LinesChanged) {
+      // Erase the rest of the lines.
+      const bool EndRest = End.Column < File.Content[End.Line].size();
+      std::string Save;
+      if (EndRest)
+        Save = File.Content[End.Line].substr(End.Column);
+      File.Content.erase(File.Content.begin() + Start.Line + LastReplaced + 1,
+                         File.Content.begin() + End.Line + 1);
+      File.Content[Start.Line + LastReplaced].append(Save);
+    } else {
+      // Insert the rest of the lines.
+      NewLines.back().append(StartSave);
+      File.Content.insert(File.Content.begin() + Start.Line + LastReplaced + 1,
+                          NewLines.begin() + LastReplaced + 1, NewLines.end());
+    }
   }
 
+  File.CachedNodes = LoadFromLines(*Path, File.Content);
+  UpdateDiagnosticsFor(FsPath, File);
   Log(">> 'textDocument/didChange' done!\n");
 }
 
@@ -847,11 +895,9 @@ void lsp::Server::SemanticTokensRange(const json::Value &Id,
     return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
                      Id);
 
-
-  SendResult(
-      Id, fmt::format(R"({{ "data": [{}] }})",
-                      CalculateAndSendSemanticTokens(
-                          FileIt->second, Start->Line, End->Line)));
+  SendResult(Id, fmt::format(R"({{ "data": [{}] }})",
+                             CalculateAndSendSemanticTokens(
+                                 FileIt->second, Start->Line, End->Line)));
   Log(">> 'textDocument/semanticTokens/full' done!\n");
 }
 
@@ -1001,7 +1047,8 @@ void lsp::Server::LoadFromWorkspace(const Workspace &Workspace) {
     auto &File = Files[Path];
     File.Path = Path;
     File.Parent = &Workspace;
-    File.CachedNodes = LoadFromFile(Path);
+    File.Content = FileToLines(Path);
+    File.CachedNodes = LoadFromLines(Path, File.Content);
 
     // Workspace files are always error checked.
     if (Initialized)
