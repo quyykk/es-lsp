@@ -103,3 +103,31 @@ int main(int Argc, char *Argv[]) {
   lsp::Log(">> Shutting down...");
   return Server.GetState() == lsp::ServerState::ExitSuccess ? 0 : -1;
 }
+
+#ifdef __EMSCRIPTEN__
+// see https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html
+#include <emscripten.h>
+#include <emscripten/bind.h>
+
+using namespace emscripten;
+
+
+EMSCRIPTEN_BINDINGS(Server) {
+  enum_<lsp::ServerState>("ServerState")
+      .value("Running", lsp::ServerState::Running)
+      .value("ExitSuccess", lsp::ServerState::ExitSuccess)
+      .value("ExitError", lsp::ServerState::ExitError);
+
+  class_<lsp::Server>("Server")
+    .constructor<>()
+    .function("HandleNotification", &lsp::Server::HandleNotification)
+    .function("LoadFromDirectory", &lsp::Server::LoadFromDirectory)
+    .function("GetState", &lsp::Server::LoadFromDirectory);
+
+  function("Log", optional_override(
+          [](const std::string s) {
+              lsp::Log("log from JS: {}", s);
+          }
+      ));
+}
+#endif
