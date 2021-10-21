@@ -31,7 +31,7 @@ std::list<lsp::Workspace> ParseWorkspace(json::array Value) {
 
 // Parses a location.
 std::optional<lsp::Location> ParseLocation(json::object Value) {
-  return lsp::Location{Value["line"], Value["character"]};
+  return lsp::Location{Value["line"].get_uint64().value(), Value["character"].get_uint64().value()};
 }
 
 std::string RangeToJson(const lsp::Location &Start, const lsp::Location &End) {
