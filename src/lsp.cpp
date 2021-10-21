@@ -23,14 +23,14 @@ std::list<lsp::Workspace> ParseWorkspace(json::array Value) {
   std::list<lsp::Workspace> workspaces;
   for (auto Element : Value) {
     workspaces.emplace_back();
-    workspaces.back().Name = (std::string_view)Element["name"];
+    workspaces.back().Name = Element["name"].get_string().value();
     workspaces.back().Path = lsp::UriToFsPath(Element["uri"]);
   }
   return workspaces;
 }
 
 // Parses a location.
-std::optional<lsp::Location> ParseLocation(json::object Value) {
+lsp::Location ParseLocation(json::object Value) {
   lsp::Location Location;
   Location.Line = Value["line"].get_uint64();
   Location.Column = Value["character"].get_uint64();
@@ -46,6 +46,14 @@ std::string RangeToJson(const lsp::Location &Start, const lsp::Location &End) {
                      Start.Line, Start.Column, End.Line, End.Column);
 }
 
+std::string IdToString(json::value Id) {
+  if (Id.type() == json::json_type::string)
+    return fmt::format("\"{}\"", Id.get_string().value());
+  else if (Id.type() == json::json_type::number)
+    return fmt::format("{}", Id.get_int64().value());
+  return "null";
+}
+
 constexpr int ParseError = -32700;
 constexpr int InvalidRequest = -32600;
 constexpr int MethodNotFound = -32601;
@@ -59,8 +67,7 @@ void lsp::Server::HandleNotification(std::string Message) try {
   json::document Doc = Parser.iterate(Message);
 
   // We expect a valid JSON-RPC object.
-  std::string_view Version = Doc["jsonrpc"];
-  if (Version != "2.0")
+  if (Doc["jsonrpc"] != "2.0")
     return SendError(InvalidRequest, "Unknown JSON RPC version", Doc.find_field("id"));
 
   json::value Id = Doc.find_field("id");
@@ -166,40 +173,26 @@ auto lsp::Server::GetState() const -> ServerState { return State; }
 
 void lsp::Server::SendError(int Error, std::string_view Message,
                             json::value Id) {
-  std::string IdStr;
-  if (Id.type() == json::json_type::string)
-    IdStr = fmt::format("\"{}\"", Id.get_string().value());
-  else if (Id.type() == json::json_type::number)
-    IdStr = fmt::format("{}", Id.get_int64().value());
-  else
-    IdStr = "null";
-
   auto Json = fmt::format(R"(
 {{
     "jsonrpc": "2.0",
     "id": {},
     "error": {{ "code": {}, "message": "{}" }}
 }})",
-                          IdStr, Error, Message);
+                          IdToString(Id), Error, Message);
   fmt::print("Content-Length: {}\r\n\r\n{}", Json.size(), Json);
   Log(">> Error: {}\n", Json);
   std::cout.flush();
 }
 
 void lsp::Server::SendResult(json::value Id, std::string_view Result) {
-  std::string IdStr;
-  if (Id.type() == json::json_type::string)
-    IdStr = fmt::format("\"{}\"", Id.get_string().value());
-  else
-    IdStr = fmt::format("{}", Id.get_int64().value());
-
   auto Message = fmt::format(R"(
 {{
     "jsonrpc": "2.0",
     "id": {},
     "result": {}
 }})",
-                             IdStr, Result);
+                             IdToString(Id), Result);
 
   Sanitize(Message);
   fmt::print("Content-Length: {}\r\n\r\n{}", Message.size(), Message);
@@ -363,10 +356,8 @@ void lsp::Server::DidChange(json::value Id, json::object Value) {
 
     json::value Range = Change.find_field("range");
     if (Range.type() == json::json_type::object) {
-      if (auto StartPos = ParseLocation(Range["start"]))
-        Start = *StartPos;
-      if (auto EndPos = ParseLocation(Range["end"]))
-        End = *EndPos;
+      Start = ParseLocation(Range["start"]);
+      End = ParseLocation(Range["end"]);
     }
 
     std::string_view Text = Change["text"];
@@ -439,10 +430,8 @@ void lsp::Server::DidClose(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/didClose'.\n");
 
   json::object TextDocument = Value["textDocument"];
-  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(Path);
-  auto It = Files.find(FsPath);
+  auto It = Files.find(UriToFsPath(TextDocument["uri"]));
   if (It == Files.end())
     return SendError(InvalidRequest, "can't close file that hasn't been loaded",
                      Id);
@@ -459,32 +448,29 @@ void lsp::Server::Completion(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/completion'.\n");
 
   json::object TextDocument = Value["textDocument"];
-  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(Path);
+  auto FsPath = UriToFsPath(TextDocument["uri"]);
   auto Position = ParseLocation(Value["position"]);
-  if (!Position)
-    return SendError(ParseError, "Error parsing inner 'position' field", Id);
 
   // Now we need to figure out what the autocomplete list is.
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "completion wanted on unloaded file", Id);
 
-  auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
+  auto It = FileIt->second.CachedNodes.Nodes.find(Position.Line);
   if (It == FileIt->second.CachedNodes.Nodes.end()) {
     // We are somewhere without a node definition so figure out on what indent
     // level the client is.
-    if (Position->Line >= FileIt->second.Content.size())
+    if (Position.Line >= FileIt->second.Content.size())
       return SendError(InvalidRequest, "line too big", Id);
 
-    std::string_view CurrentLine = FileIt->second.Content[Position->Line];
+    std::string_view CurrentLine = FileIt->second.Content[Position.Line];
     const auto Indent =
         CountLineIndentation(CurrentLine, /*AllowEmptyLines=*/true);
 
     // Calculate line of the parent node.
     std::size_t ParentLine = -1;
-    for (auto I = Position->Line - 1; I >= 0; --I) {
+    for (auto I = Position.Line - 1; I >= 0; --I) {
       std::string_view Line = FileIt->second.Content[I];
       const auto LineIndent =
           CountLineIndentation(Line, /*AllowEmptyLines=*/true);
@@ -555,8 +541,8 @@ void lsp::Server::Completion(json::value Id, json::object Value) {
   std::size_t Index = -1;
   for (std::size_t I = 0; I < Node.Parameters.size(); ++I) {
     bool IsQuoted = Node.Quoted[I];
-    if (Position->Column >= Node.Columns[I] - IsQuoted &&
-        Position->Column <=
+    if (Position.Column >= Node.Columns[I] - IsQuoted &&
+        Position.Column <=
             Node.Columns[I] + Node.Parameters[I].size() + 2 * IsQuoted) {
       Index = I;
       break;
@@ -612,9 +598,9 @@ void lsp::Server::Completion(json::value Id, json::object Value) {
   if (Node.Parent) {
     if (!Node.Quoted[Index])
       AddQuotes = true;
-    if (Position->Column == Node.Columns[Index] - Node.Quoted[Index])
+    if (Position.Column == Node.Columns[Index] - Node.Quoted[Index])
       AddStartQuote = true;
-    if (Position->Column == Node.Columns[Index] +
+    if (Position.Column == Node.Columns[Index] +
                                 Node.Parameters[Index].size() +
                                 Node.Quoted[Index])
       AddEndQuote = true;
@@ -661,18 +647,15 @@ void lsp::Server::Hover(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/hover'.\n");
 
   json::object TextDocument = Value["textDocument"];
-  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(Path);
+  auto FsPath = UriToFsPath(TextDocument["uri"]);
   auto Position = ParseLocation(Value["position"]);
-  if (!Position)
-    return SendError(ParseError, "Error parsing inner 'position' field", Id);
 
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "hover wanted on unloaded file", Id);
 
-  auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
+  auto It = FileIt->second.CachedNodes.Nodes.find(Position.Line);
   if (It == FileIt->second.CachedNodes.Nodes.end())
     // Nothing to hover.
     return SendResult(Id, "null");
@@ -719,10 +702,8 @@ void lsp::Server::SemanticTokensFull(json::value Id,
                                      json::object Value) {
   Log(">> Processing 'textDocument/semanticTokens/full'.\n");
   json::object TextDocument = Value["textDocument"];
-  std::string_view Path = TextDocument["uri"];
 
-  const auto FsPath = UriToFsPath(Path);
-  auto FileIt = Files.find(FsPath);
+  auto FileIt = Files.find(UriToFsPath(TextDocument["uri"]));
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
                      Id);
@@ -741,25 +722,19 @@ void lsp::Server::SemanticTokensRange(json::value Id,
                                       json::object Value) {
   Log(">> Processing 'textDocument/semanticTokens/full'.\n");
   json::object TextDocument = Value["textDocument"];
-  std::string_view Path = TextDocument["uri"];
 
   json::object Range = Value["range"];
   auto Start = ParseLocation(Range["start"]);
-  if (!Start)
-    return SendError(ParseError, "Error parsing 'start' location", Id);
   auto End = ParseLocation(Range["end"]);
-  if (!End)
-    return SendError(ParseError, "Error parsing 'end' location", Id);
 
-  const auto FsPath = UriToFsPath(Path);
-  auto FileIt = Files.find(FsPath);
+  auto FileIt = Files.find(UriToFsPath(TextDocument["uri"]));
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
                      Id);
 
   SendResult(Id, fmt::format(R"({{ "data": [{}] }})",
                              CalculateAndSendSemanticTokens(
-                                 FileIt->second, Start->Line, End->Line)));
+                                 FileIt->second, Start.Line, End.Line)));
   Log(">> 'textDocument/semanticTokens/full' done!\n");
 }
 
@@ -767,18 +742,14 @@ void lsp::Server::Goto(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/{{declaration,definition}}'.\n");
 
   json::object TextDocument = Value["textDocument"];
-  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(Path);
   auto Position = ParseLocation(Value["position"]);
-  if (!Position)
-    return SendError(ParseError, "Error parsing inner 'position' field", Id);
 
-  auto FileIt = Files.find(FsPath);
+  auto FileIt = Files.find(UriToFsPath(TextDocument["uri"]));
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "goto wanted on unloaded file", Id);
 
-  auto It = FileIt->second.CachedNodes.Nodes.find(Position->Line);
+  auto It = FileIt->second.CachedNodes.Nodes.find(Position.Line);
   if (It == FileIt->second.CachedNodes.Nodes.end())
     return SendResult(Id, "null");
   const auto &Node = It->second;
@@ -787,11 +758,11 @@ void lsp::Server::Goto(json::value Id, json::object Value) {
   // TODO: Tons of code duplication here and elsewhere.
   std::size_t Index = -1;
   for (std::size_t I = 0; I < Node.Parameters.size(); ++I) {
-    if (Node.Columns[I] == Position->Column) {
+    if (Node.Columns[I] == Position.Column) {
       Index = I;
       break;
-    } else if (Position->Column > Node.Columns[I] &&
-               Position->Column <=
+    } else if (Position.Column > Node.Columns[I] &&
+               Position.Column <=
                    Node.Columns[I] + Node.Parameters[I].size()) {
       Index = I;
       break;
