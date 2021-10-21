@@ -51,7 +51,7 @@ constexpr int InvalidRequest = -32600;
 constexpr int MethodNotFound = -32601;
 } // namespace
 
-void lsp::Server::HandleNotification(std::string Message) {
+void lsp::Server::HandleNotification(std::string Message) try {
   Log(">> Client sent:\n{}'\n", Message);
 
   Message.reserve(Message.size() + simdjson::SIMDJSON_PADDING);
@@ -138,6 +138,10 @@ void lsp::Server::HandleNotification(std::string Message) {
   // Unknown method.
   LogError(">> Unknown method '{}'.\n", Method);
   return SendError(MethodNotFound, "Method not found", Id);
+}
+catch (const simdjson::simdjson_error &Error)
+{
+  SendError(ParseError, Error.what(), {});
 }
 
 void lsp::Server::LoadFromDirectory(std::string_view Path) {
