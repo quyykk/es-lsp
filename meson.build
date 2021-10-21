@@ -13,6 +13,7 @@ endif
 
 if compiler.get_id() == 'clang'
   add_project_arguments('-stdlib=libc++', language : 'cpp')
+  add_project_arguments('-Wno-ambiguous-reversed-operator', language : 'cpp')
   add_project_link_arguments('-stdlib=libc++', language : 'cpp')
 endif
 
