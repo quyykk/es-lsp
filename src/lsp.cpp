@@ -18,73 +18,20 @@ using namespace std::literals;
 
 namespace {
 
-namespace impl {
-
-// Parses a value, either a string or an int from JSON. If it exists.
-template <typename T>
-std::optional<T> GetValue(const json::Value &Value, std::string_view Name) {
-  auto It = Value.FindMember(Name.data());
-  if (It == Value.MemberEnd())
-    return std::nullopt;
-
-  if constexpr (std::is_same_v<T, int>) {
-    if (!It->value.IsInt())
-      return std::nullopt;
-    return It->value.GetInt();
-  } else if constexpr (std::is_same_v<T, std::string_view>) {
-    if (!It->value.IsString())
-      return std::nullopt;
-    return It->value.GetString();
-  } else if constexpr (std::is_same_v<T, unsigned>) {
-    if (!It->value.IsUint())
-      return std::nullopt;
-    return It->value.GetUint();
-  }
-
-  return std::nullopt;
-}
-
-} // namespace impl
-
-std::optional<std::string_view> GetString(const json::Value &Value,
-                                          std::string_view Name) {
-  return impl::GetValue<std::string_view>(Value, Name);
-}
-std::optional<int> GetInt(const json::Value &Value, std::string_view Name) {
-  return impl::GetValue<int>(Value, Name);
-}
-std::optional<unsigned> GetUint(const json::Value &Value,
-                                std::string_view Name) {
-  return impl::GetValue<unsigned>(Value, Name);
-}
-
 // Parses a workspace json array.
-std::list<lsp::Workspace> ParseWorkspace(const json::Value &Value) {
+std::list<lsp::Workspace> ParseWorkspace(json::array Value) {
   std::list<lsp::Workspace> workspaces;
-  for (json::SizeType I = 0; I < Value.Size(); ++I) {
-    auto Name = GetString(Value[I], "name");
-    if (!Name)
-      continue;
-    auto Uri = GetString(Value[I], "uri");
-    if (!Uri)
-      continue;
-
+  for (auto Element : Value) {
     workspaces.emplace_back();
-    workspaces.back().Name = *Name;
-    workspaces.back().Path = lsp::UriToFsPath(*Uri);
+    workspaces.back().Name = (std::string_view)Element["name"];
+    workspaces.back().Path = lsp::UriToFsPath(Element["uri"]);
   }
   return workspaces;
 }
 
 // Parses a location.
-std::optional<lsp::Location> ParseLocation(const json::Value &Value) {
-  auto Line = GetUint(Value, "line");
-  if (!Line)
-    return std::nullopt;
-  auto Column = GetUint(Value, "character");
-  if (!Column)
-    return std::nullopt;
-  return lsp::Location{*Line, *Column};
+std::optional<lsp::Location> ParseLocation(json::object Value) {
+  return lsp::Location{Value["line"], Value["character"]};
 }
 
 std::string RangeToJson(const lsp::Location &Start, const lsp::Location &End) {
@@ -104,77 +51,72 @@ constexpr int MethodNotFound = -32601;
 void lsp::Server::HandleNotification(std::string Message) {
   Log(">> Client sent:\n{}'\n", Message);
 
-  json::Document Doc;
-  if (Doc.Parse(Message.data()).HasParseError())
-    return SendError(ParseError, "Invalid JSON");
-  if (!Doc.IsObject())
-    return SendError(ParseError, "JSON document not an object");
+  Message.reserve(Message.size() + simdjson::SIMDJSON_PADDING);
+  json::parser Parser;
+  json::document Doc = Parser.iterate(Message);
 
   // We expect a valid JSON-RPC object.
-  auto Version = GetString(Doc, "jsonrpc");
+  std::string_view Version = Doc["jsonrpc"];
   if (Version != "2.0")
-    return SendError(InvalidRequest, "Unknown JSON RPC version");
+    return SendError(InvalidRequest, "Unknown JSON RPC version", Doc.find_field("id"));
 
-  auto Id = Doc.FindMember("id");
+  json::value Id = Doc.find_field("id");
   // Requests without an "id" are in fact a notification.
 
-  auto Method = GetString(Doc, "method");
-  if (!Method)
-    return SendError(ParseError, "Error parsing 'method' member", Id->value);
-
-  auto ParamsVal = Doc.FindMember("params");
+  std::string_view Method = Doc["method"];
+  json::object Params = Doc["params"];
   // "params" is optional.
 
-  Log(">> Received method '{}'.\n", *Method);
+  Log(">> Received method '{}'.\n", Method);
 
   // Now that we have parsed the JSON RPC object, handle the given request.
-  if (*Method == "initialize")
-    return Initialize(Id->value, ParamsVal->value);
-  if (*Method == "initialized")
+  if (Method == "initialize")
+    return Initialize(Id, Params);
+  if (Method == "initialized")
     // All good! Nothing to do here.
     return;
 
   // The "initialize" request needs to be called before all other requests.
   if (!Initialized)
-    return SendError(-32002, "Did not call 'initialize'", Id->value);
-  if (*Method == "shutdown") {
+    return SendError(-32002, "Did not call 'initialize'", Id);
+  if (Method == "shutdown") {
     Shutdown = true;
     Log(">> 'shutdown' done!\n");
     // Workaround for buggy clients (like the VScode one)
     // that don't send an 'exit' notification sometimes.
     State = ServerState::ExitSuccess;
-    return SendResult(Id->value, "null");
+    return SendResult(Id, "null");
   }
-  if (*Method == "exit") {
+  if (Method == "exit") {
     State = Shutdown ? ServerState::ExitSuccess : ServerState::ExitError;
     Log(">> 'exit' done!\n");
     return;
   }
   if (Shutdown)
-    return SendError(InvalidRequest, "Server is shutting down", Id->value);
+    return SendError(InvalidRequest, "Server is shutting down", Id);
 
   // TODO: What are workspace symbols?
   // TODO: Implement file watch operations.
-  if (*Method == "workspace/didChangeWorkspaceFolders")
-    return DidChangeWorkspaceFolders(Id->value, ParamsVal->value);
-  if (*Method == "workspace/didChangeConfiguration")
+  if (Method == "workspace/didChangeWorkspaceFolders")
+    return DidChangeWorkspaceFolders(Id, Params);
+  if (Method == "workspace/didChangeConfiguration")
     // We don't have any configurations yet.
     return;
-  if (*Method == "textDocument/didOpen")
-    return DidOpen(Id->value, ParamsVal->value);
-  if (*Method == "textDocument/didChange")
-    return DidChange(Id->value, ParamsVal->value);
-  if (*Method == "textDocument/didClose")
-    return DidClose(Id->value, ParamsVal->value);
-  if (*Method == "textDocument/completion")
-    return Completion(Id->value, ParamsVal->value);
-  if (*Method == "textDocument/hover")
-    return Hover(Id->value, ParamsVal->value);
+  if (Method == "textDocument/didOpen")
+    return DidOpen(Id, Params);
+  if (Method == "textDocument/didChange")
+    return DidChange(Id, Params);
+  if (Method == "textDocument/didClose")
+    return DidClose(Id, Params);
+  if (Method == "textDocument/completion")
+    return Completion(Id, Params);
+  if (Method == "textDocument/hover")
+    return Hover(Id, Params);
   // TODO: 'textDocument/signatureHelp'
-  if (*Method == "textDocument/declaration" ||
-      *Method == "textDocument/definition" ||
-      *Method == "textDocument/implementation")
-    return Goto(Id->value, ParamsVal->value);
+  if (Method == "textDocument/declaration" ||
+      Method == "textDocument/definition" ||
+      Method == "textDocument/implementation")
+    return Goto(Id, Params);
   // TODO: 'textDocument/references'
   // TODO: 'textDocument/documentHighlight'
   // TODO: 'textDocument/documentSymbol'
@@ -182,19 +124,17 @@ void lsp::Server::HandleNotification(std::string Message) {
   // TODO: 'textDocument/colorPresentation'
   // TODO: 'textDocument/rename'
   // TODO: 'textDocument/foldingRange'
-  if (*Method == "textDocument/semanticTokens/full")
-    return SemanticTokensFull(Id->value, ParamsVal->value);
-  if (*Method == "textDocument/semanticTokens/full/delta")
-    return SemanticTokensRange(Id->value, ParamsVal->value);
-  if (*Method == "textDocument/semanticTokens/range")
-    return SemanticTokensRange(Id->value, ParamsVal->value);
+  if (Method == "textDocument/semanticTokens/full")
+    return SemanticTokensFull(Id, Params);
+  if (Method == "textDocument/semanticTokens/full/delta")
+    return SemanticTokensRange(Id, Params);
+  if (Method == "textDocument/semanticTokens/range")
+    return SemanticTokensRange(Id, Params);
   // TODO: 'textDocument/linkedEditingRange'
 
   // Unknown method.
-  LogError(">> Unknown method '{}'.\n", *Method);
-  if (Id != Doc.MemberEnd())
-    return SendError(MethodNotFound, "Method not found", Id->value);
-  return SendError(MethodNotFound, "Notification not found");
+  LogError(">> Unknown method '{}'.\n", Method);
+  return SendError(MethodNotFound, "Method not found", Id);
 }
 
 void lsp::Server::LoadFromDirectory(std::string_view Path) {
@@ -218,12 +158,12 @@ void lsp::Server::LoadFromDirectory(std::string_view Path) {
 auto lsp::Server::GetState() const -> ServerState { return State; }
 
 void lsp::Server::SendError(int Error, std::string_view Message,
-                            const json::Value &Id) {
+                            json::value Id) {
   std::string IdStr;
-  if (Id.IsString())
-    IdStr = "\""s + Id.GetString() + "\"";
-  else if (Id.IsInt())
-    IdStr = fmt::format("{}", Id.GetInt());
+  if (Id.type() == json::json_type::string)
+    IdStr = fmt::format("\"{}\"", Id.get_string().value());
+  else if (Id.type() == json::json_type::number)
+    IdStr = fmt::format("{}", Id.get_int64().value());
   else
     IdStr = "null";
 
@@ -239,12 +179,12 @@ void lsp::Server::SendError(int Error, std::string_view Message,
   std::cout.flush();
 }
 
-void lsp::Server::SendResult(const json::Value &Id, std::string_view Result) {
+void lsp::Server::SendResult(json::value Id, std::string_view Result) {
   std::string IdStr;
-  if (Id.IsString())
-    IdStr = "\""s + Id.GetString() + "\"";
+  if (Id.type() == json::json_type::string)
+    IdStr = fmt::format("\"{}\"", Id.get_string().value());
   else
-    IdStr = fmt::format("{}", Id.GetInt());
+    IdStr = fmt::format("{}", Id.get_int64().value());
 
   auto Message = fmt::format(R"(
 {{
@@ -276,15 +216,15 @@ void lsp::Server::SendNotification(std::string_view Method,
   std::cout.flush();
 }
 
-void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::Initialize(json::value Id, json::object Value) {
   Log(">> Processing 'initialize'.\n");
   if (Initialized)
     return SendError(InvalidRequest, "Server already initialized", Id);
 
   // Most fields here are not needed.
-  auto It = Value.FindMember("workspaceFolders");
-  if (It != Value.MemberEnd() && It->value.IsArray()) {
-    Workspaces = ParseWorkspace(It->value);
+  json::value It = Value.find_field("workspaceFolders");
+  if (It.type() == json::json_type::array) {
+    Workspaces = ParseWorkspace(It.get_array());
     for (const auto &Workspace : Workspaces)
       LoadFromWorkspace(Workspace);
   }
@@ -328,32 +268,19 @@ void lsp::Server::Initialize(const json::Value &Id, const json::Value &Value) {
   Log(">> 'initialize' done!\n");
 }
 
-void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
-                                            const json::Value &Value) {
+void lsp::Server::DidChangeWorkspaceFolders(json::value Id,
+                                            json::object Value) {
   Log(">> Processing 'workspace/didChangeWorkspaceFolders'.\n");
 
-  auto Event = Value.FindMember("event");
-  if (Event == Value.MemberEnd())
-    return SendError(ParseError, "Couldn't parse 'event' field", Id);
-  auto Added = Event->value.FindMember("added");
-  if (Added == Event->value.MemberEnd() || Added->value.IsArray())
-    return SendError(ParseError, "Error parsing 'added' field", Id);
-  auto Removed = Event->value.FindMember("removed");
-  if (Removed == Event->value.MemberEnd() || Removed->value.IsArray())
-    return SendError(ParseError, "Error parsing 'removed' field", Id);
+  json::object Event = Value["event"];
 
   // Now actually change definitions based on the workspace change.
-  for (json::SizeType I = 0; I < Removed->value.Size(); ++I) {
-    const auto &Remove = Removed[I].value;
-    if (!Remove.IsObject())
-      return SendError(ParseError, "Array element isn't an object", Id);
-    auto Path = GetString(Remove, "uri");
-    if (!Path)
-      return SendError(ParseError, "Error parsing 'uri' field", Id);
+  for (json::object Remove : Event["removed"]) {
+    std::string_view Path = Remove["uri"];
 
     auto WorkspaceIt = std::find_if(
         Workspaces.begin(), Workspaces.end(),
-        [&Path](const auto &Workspace) { return Workspace.Path == *Path; });
+        [&Path](const auto &Workspace) { return Workspace.Path == Path; });
     if (WorkspaceIt == Workspaces.end())
       return SendError(InvalidRequest, "Specified workspace doesn't exist", Id);
 
@@ -365,42 +292,24 @@ void lsp::Server::DidChangeWorkspaceFolders(const json::Value &Id,
         ++It;
     Workspaces.erase(WorkspaceIt);
   }
-  for (json::SizeType I = 0; I < Added->value.Size(); ++I) {
-    const auto &Add = Added[I].value;
-    if (!Add.IsObject())
-      return SendError(ParseError, "Array element isn't an object", Id);
-    auto Path = GetString(Add, "uri");
-    if (!Path)
-      return SendError(ParseError, "Error parsing 'uri' field", Id);
-    auto Name = GetString(Add, "name");
-    if (!Name)
-      return SendError(ParseError, "Error parsing 'name' field", Id);
-
+  for (json::object Add : Event["added"]) {
     Workspaces.emplace_back();
-    Workspaces.back().Name = *Name;
-    Workspaces.back().Path = UriToFsPath(*Path);
+    Workspaces.back().Name = Add["uri"].get_string().value();
+    Workspaces.back().Path = UriToFsPath(Add["path"]);
     LoadFromWorkspace(Workspaces.back());
   }
   Log(">> 'workspace/didChangeWorkspaceFolders' done!\n");
 }
 
-void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::DidOpen(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/didOpen'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto Version = GetInt(TextDocument->value, "version");
-  if (!Version)
-    return SendError(ParseError, "Error parsing 'version' field", Id);
-  auto Text = GetString(TextDocument->value, "text");
-  if (!Text)
-    return SendError(ParseError, "Error parsing 'text' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
+  int Version = TextDocument["version"];
+  std::string_view Text = TextDocument["text"];
 
-  auto FsPath = UriToFsPath(*Path);
+  auto FsPath = UriToFsPath(Path);
   auto It = Files.find(FsPath);
   if (It != Files.end())
     UpdateDiagnosticsFor(FsPath,
@@ -410,33 +319,25 @@ void lsp::Server::DidOpen(const json::Value &Id, const json::Value &Value) {
     // If the file doesn't exist we load it.
     It = Files.emplace(FsPath, File()).first;
     It->second.Path = FsPath;
-    It->second.Content = TextToLines(*Text);
-    It->second.CachedNodes = LoadFromLines(*Path, It->second.Content);
-    UpdateDiagnosticsFor(*Path, It->second);
+    It->second.Content = TextToLines(Text);
+    It->second.CachedNodes = LoadFromLines(Path, It->second.Content);
+    UpdateDiagnosticsFor(Path, It->second);
   }
-  It->second.Version = *Version;
+  It->second.Version = Version;
   It->second.IsOpen = true;
 
   Log(">> 'textDocument/didOpen' done!\n");
 }
 
-void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::DidChange(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/didChange'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto Version = GetInt(TextDocument->value, "version");
-  if (!Version)
-    return SendError(ParseError, "Error parsing 'version' field", Id);
-  auto Changes = Value.FindMember("contentChanges");
-  if (Changes == Value.MemberEnd() || !Changes->value.IsArray())
-    return SendError(ParseError, "Error parsing 'contentChanges' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
+  int Version = TextDocument["version"];
+  json::array Changes = Value["contentChanges"];
 
-  auto FsPath = UriToFsPath(*Path);
+  auto FsPath = UriToFsPath(Path);
   auto It = Files.find(FsPath);
   if (It == Files.end())
     return SendError(InvalidRequest, "didChange called on unloaded file", Id);
@@ -446,48 +347,36 @@ void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
     return SendError(InvalidRequest, "didChange called on unopened file", Id);
 
   // If the version is older than what the server has, don't do anything.
-  if (File.Version > *Version)
+  if (File.Version > Version)
     return;
 
-  for (json::SizeType I = 0; I < Changes->value.Size(); ++I) {
-    const auto &Change = Changes->value[I];
+  for (json::object Change : Changes) {
     Location Start;
     Location End;
 
-    auto Range = Change.FindMember("range");
-    if (Range != Change.MemberEnd()) {
-      if (!Range->value.IsObject())
-        return SendError(ParseError, "Error parsing 'range' field", Id);
-      auto StartVal = Range->value.FindMember("start");
-      if (StartVal == Range->value.MemberEnd() || !StartVal->value.IsObject())
-        return SendError(ParseError, "Error parsing 'start' field", Id);
-      auto EndVal = Range->value.FindMember("end");
-      if (EndVal == Range->value.MemberEnd() || !EndVal->value.IsObject())
-        return SendError(ParseError, "Error parsing 'end' field", Id);
-
-      if (auto StartPos = ParseLocation(StartVal->value))
+    json::value Range = Change.find_field("range");
+    if (Range.type() == json::json_type::object) {
+      if (auto StartPos = ParseLocation(Range["start"]))
         Start = *StartPos;
-      if (auto EndPos = ParseLocation(EndVal->value))
+      if (auto EndPos = ParseLocation(Range["end"]))
         End = *EndPos;
     }
 
-    auto Text = GetString(Change, "text");
-    if (!Text)
-      return SendError(ParseError, "Error parsing 'text' field", Id);
+    std::string_view Text = Change["text"];
 
     // Now actually update our copy of the file and recalculate every
     // diagnostic.
-    File.Version = *Version;
+    File.Version = Version;
     if (!Start && !End) {
       // The whole file changed.
-      File.Content = TextToLines(*Text);
+      File.Content = TextToLines(Text);
       continue;
     }
 
     // Only a subset changed. Find out where exactly the change occurred.
     // We're manipulation lines, so we need to detect any newlines in the
     // new text and insert the new lines in the content array.
-    auto NewLines = TextToLines(*Text);
+    auto NewLines = TextToLines(Text);
     // If we're modifying more lines than the range specifies, then this means
     // that we have new lines!
 
@@ -534,22 +423,18 @@ void lsp::Server::DidChange(const json::Value &Id, const json::Value &Value) {
     }
   }
 
-  File.CachedNodes = LoadFromLines(*Path, File.Content);
+  File.CachedNodes = LoadFromLines(Path, File.Content);
   UpdateDiagnosticsFor(FsPath, File);
   Log(">> 'textDocument/didChange' done!\n");
 }
 
-void lsp::Server::DidClose(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::DidClose(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/didClose'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(*Path);
+  auto FsPath = UriToFsPath(Path);
   auto It = Files.find(FsPath);
   if (It == Files.end())
     return SendError(InvalidRequest, "can't close file that hasn't been loaded",
@@ -563,21 +448,14 @@ void lsp::Server::DidClose(const json::Value &Id, const json::Value &Value) {
   Log(">> 'textDocument/didClose' done!\n");
 }
 
-void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::Completion(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/completion'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto PositionField = Value.FindMember("position");
-  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
-    return SendError(ParseError, "Error parsing 'position' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(*Path);
-  auto Position = ParseLocation(PositionField->value);
+  auto FsPath = UriToFsPath(Path);
+  auto Position = ParseLocation(Value["position"]);
   if (!Position)
     return SendError(ParseError, "Error parsing inner 'position' field", Id);
 
@@ -772,21 +650,14 @@ void lsp::Server::Completion(const json::Value &Id, const json::Value &Value) {
   Log(">> 'textDocument/completion' done!\n");
 }
 
-void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::Hover(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/hover'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto PositionField = Value.FindMember("position");
-  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
-    return SendError(ParseError, "Error parsing 'position' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(*Path);
-  auto Position = ParseLocation(PositionField->value);
+  auto FsPath = UriToFsPath(Path);
+  auto Position = ParseLocation(Value["position"]);
   if (!Position)
     return SendError(ParseError, "Error parsing inner 'position' field", Id);
 
@@ -837,17 +708,13 @@ void lsp::Server::Hover(const json::Value &Id, const json::Value &Value) {
   Log(">> 'textDocument/hover' done!\n");
 }
 
-void lsp::Server::SemanticTokensFull(const json::Value &Id,
-                                     const json::Value &Value) {
+void lsp::Server::SemanticTokensFull(json::value Id,
+                                     json::object Value) {
   Log(">> Processing 'textDocument/semanticTokens/full'.\n");
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
 
-  const auto FsPath = UriToFsPath(*Path);
+  const auto FsPath = UriToFsPath(Path);
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
@@ -860,36 +727,24 @@ void lsp::Server::SemanticTokensFull(const json::Value &Id,
   Log(">> 'textDocument/semanticTokens/full' done!\n");
 }
 
-void lsp::Server::SemanticTokensDelta(const json::Value &Id,
-                                      const json::Value &Value) {}
+void lsp::Server::SemanticTokensDelta(json::value Id,
+                                      json::object Value) {}
 
-void lsp::Server::SemanticTokensRange(const json::Value &Id,
-                                      const json::Value &Value) {
+void lsp::Server::SemanticTokensRange(json::value Id,
+                                      json::object Value) {
   Log(">> Processing 'textDocument/semanticTokens/full'.\n");
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
 
-  auto Range = Value.FindMember("range");
-  if (Range == Value.MemberEnd() || !Range->value.IsObject())
-    return SendError(ParseError, "Error parsing 'range' field", Id);
-  auto StartIt = Range->value.FindMember("start");
-  if (StartIt == Range->value.MemberEnd() || !StartIt->value.IsObject())
-    return SendError(ParseError, "Error parsing 'start' field", Id);
-  auto EndIt = Range->value.FindMember("end");
-  if (EndIt == Range->value.MemberEnd() || !EndIt->value.IsObject())
-    return SendError(ParseError, "Error parsing 'end' field", Id);
-  auto Start = ParseLocation(StartIt->value);
+  json::object Range = Value["range"];
+  auto Start = ParseLocation(Range["start"]);
   if (!Start)
     return SendError(ParseError, "Error parsing 'start' location", Id);
-  auto End = ParseLocation(EndIt->value);
+  auto End = ParseLocation(Range["end"]);
   if (!End)
     return SendError(ParseError, "Error parsing 'end' location", Id);
 
-  const auto FsPath = UriToFsPath(*Path);
+  const auto FsPath = UriToFsPath(Path);
   auto FileIt = Files.find(FsPath);
   if (FileIt == Files.end())
     return SendError(InvalidRequest, "semantic tokens wanted on unloaded file",
@@ -901,21 +756,14 @@ void lsp::Server::SemanticTokensRange(const json::Value &Id,
   Log(">> 'textDocument/semanticTokens/full' done!\n");
 }
 
-void lsp::Server::Goto(const json::Value &Id, const json::Value &Value) {
+void lsp::Server::Goto(json::value Id, json::object Value) {
   Log(">> Processing 'textDocument/{{declaration,definition}}'.\n");
 
-  auto TextDocument = Value.FindMember("textDocument");
-  if (TextDocument == Value.MemberEnd() || !TextDocument->value.IsObject())
-    return SendError(ParseError, "Error parsing 'textDocument' field", Id);
-  auto Path = GetString(TextDocument->value, "uri");
-  if (!Path)
-    return SendError(ParseError, "Error parsing 'uri' field", Id);
-  auto PositionField = Value.FindMember("position");
-  if (PositionField == Value.MemberEnd() || !PositionField->value.IsObject())
-    return SendError(ParseError, "Error parsing 'position' field", Id);
+  json::object TextDocument = Value["textDocument"];
+  std::string_view Path = TextDocument["uri"];
 
-  auto FsPath = UriToFsPath(*Path);
-  auto Position = ParseLocation(PositionField->value);
+  auto FsPath = UriToFsPath(Path);
+  auto Position = ParseLocation(Value["position"]);
   if (!Position)
     return SendError(ParseError, "Error parsing inner 'position' field", Id);
 

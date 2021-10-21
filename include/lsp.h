@@ -8,9 +8,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "rapidjson/document.h"
+#include "simdjson/simdjson.h"
 
-namespace json = rapidjson;
+namespace json = simdjson::ondemand;
 
 namespace lsp {
 
@@ -102,23 +102,23 @@ public:
 private:
   // Functions used to talk to the client.
   void SendError(int Error, std::string_view Message,
-                 const json::Value &Id = json::Value());
-  void SendResult(const json::Value &Id, std::string_view Result);
+                 json::value Id);
+  void SendResult(json::value Id, std::string_view Result);
   void SendNotification(std::string_view Method, std::string_view Params);
 
   // Callbacks called when the client send the appropriate request/notification.
-  void Initialize(const json::Value &Id, const json::Value &Value);
-  void DidChangeWorkspaceFolders(const json::Value &Id,
-                                 const json::Value &Value);
-  void DidOpen(const json::Value &Id, const json::Value &Value);
-  void DidChange(const json::Value &Id, const json::Value &Value);
-  void DidClose(const json::Value &Id, const json::Value &Value);
-  void Completion(const json::Value &Id, const json::Value &Value);
-  void Hover(const json::Value &Id, const json::Value &Value);
-  void SemanticTokensFull(const json::Value &Id, const json::Value &Value);
-  void SemanticTokensDelta(const json::Value &Id, const json::Value &Value);
-  void SemanticTokensRange(const json::Value &Id, const json::Value &Value);
-  void Goto(const json::Value &Id, const json::Value &Value);
+  void Initialize(json::value Id, json::object Value);
+  void DidChangeWorkspaceFolders(json::value Id,
+                                 json::object Value);
+  void DidOpen(json::value Id, json::object Value);
+  void DidChange(json::value Id, json::object Value);
+  void DidClose(json::value Id, json::object Value);
+  void Completion(json::value Id, json::object Value);
+  void Hover(json::value Id, json::object Value);
+  void SemanticTokensFull(json::value Id, json::object Value);
+  void SemanticTokensDelta(json::value Id, json::object Value);
+  void SemanticTokensRange(json::value Id, json::object Value);
+  void Goto(json::value Id, json::object Value);
 
   // Sends diagnostics for the given file to the client.
   void UpdateDiagnosticsFor(std::string_view Uri, const File &File);
